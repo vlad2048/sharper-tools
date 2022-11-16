@@ -1,16 +1,16 @@
 <Query Kind="Program">
-  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0\LINQPadExtras.dll</Reference>
+  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
   <NuGetReference>CliWrap</NuGetReference>
   <NuGetReference>NuGet.Protocol</NuGetReference>
+  <Namespace>CliWrap</Namespace>
+  <Namespace>CliWrap.Buffered</Namespace>
   <Namespace>LINQPadExtras</Namespace>
   <Namespace>NuGet.Common</Namespace>
+  <Namespace>NuGet.Packaging.Core</Namespace>
   <Namespace>NuGet.Protocol</Namespace>
   <Namespace>NuGet.Protocol.Core.Types</Namespace>
   <Namespace>NuGet.Versioning</Namespace>
   <Namespace>System.Threading.Tasks</Namespace>
-  <Namespace>CliWrap</Namespace>
-  <Namespace>CliWrap.Buffered</Namespace>
-  <Namespace>NuGet.Packaging.Core</Namespace>
 </Query>
 
 #load "..\cfg"
@@ -49,20 +49,22 @@ public static class ApiNuget
 	
 	public static bool DoesPkgVerExist(string name, string ver) => GetVers(name).Contains(ver);
 
-	public static void ReleaseLocally(string slnFolder, PrjNfo prj, string ver)
+	public static void ReleaseLocally(string slnFolder, PrjNfo prj, string ver, bool dryRun)
 	{
-		Con.Start("Releasing ", prj.Name, " locally");
-		var packedPrj = Pack(slnFolder, prj, ver);
+		Con.Start("Releasing ", prj.Name, " locally", dryRun);
+		if (CheckLocks(prj, ver, dryRun)) return;
+		var packedPrj = Pack(slnFolder, prj, ver, dryRun);
 		Con.AddArtifact(ReleaseToFolder(packedPrj, Cfg.Nuget.LocalPackageFolder, false));
 		Con.AddArtifact(ReleaseToFolder(packedPrj, GlobalPackagesFolder, true));
 		Con.DeleteFile(packedPrj.PkgFile);
 		Con.EndSuccess();
 	}
 
-	public static void ReleaseToNuget(string slnFolder, PrjNfo prj, string ver, string nugetUrlForLog)
+	public static void ReleaseToNuget(string slnFolder, PrjNfo prj, string ver, string nugetUrlForLog, bool dryRun)
 	{
-		Con.Start("Releasing ", prj.Name, " to Nuget");
-		var packedPrj = Pack(slnFolder, prj, ver);
+		Con.Start("Releasing ", prj.Name, " to Nuget", dryRun);
+		if (CheckLocks(prj, ver, dryRun)) return;
+		var packedPrj = Pack(slnFolder, prj, ver, dryRun);
 
 		Con.Run("nuget",
 			"push",
@@ -126,6 +128,23 @@ public static class ApiNuget
 	// ***********
 	// * Private *
 	// ***********
+	private static string MkReleaseFolder(PrjNfo prj, string version, string packageFolder) => Path.Combine(packageFolder, prj.NameLower, version);
+
+	private static bool CheckLocks(PrjNfo prj, string ver, bool dryRun)
+	{
+		if (dryRun) return false;
+		if (Con.CheckForFolderLocks(
+			MkReleaseFolder(prj, ver, Cfg.Nuget.LocalPackageFolder),
+			MkReleaseFolder(prj, ver, GlobalPackagesFolder)
+		))
+		{
+			Con.EndCancel();
+			return true;
+		}
+		return false;
+	}
+	
+
 	private record NugetNfo(
 		ILogger Logger,
 		SourceCacheContext Cache,
@@ -166,7 +185,7 @@ public static class ApiNuget
 	
 	private static string GlobalPackagesFolder => globalPackagesFolder.Value;
 
-	private record PackedPrj(string PkgFile)
+	private record PackedPrj(PrjNfo Prj, string PkgFile)
 	{
 		private string BaseFile => Path.GetFileNameWithoutExtension(PkgFile);
 		public string PkgFolder => Path.GetDirectoryName(PkgFile)!;
@@ -177,10 +196,9 @@ public static class ApiNuget
 
 	private static readonly Dictionary<string, List<string>> verMap = new();
 
-
 	private static string ReleaseToFolder(PackedPrj packedPrj, string packageFolder, bool expand)
 	{
-		var folder = Path.Combine(packageFolder, packedPrj.ProjNameLower, packedPrj.Version);
+		var folder = MkReleaseFolder(packedPrj.Prj, packedPrj.Version, packageFolder);
 		Con.DeleteFolder(folder);
 
 		var args = new List<string>
@@ -196,7 +214,7 @@ public static class ApiNuget
 		return folder;
 	}
 
-	private static PackedPrj Pack(string slnFolder, PrjNfo prj, string ver)
+	private static PackedPrj Pack(string slnFolder, PrjNfo prj, string ver, bool dryRun)
 	{
 		/*
 			Alternatives:
@@ -222,8 +240,8 @@ public static class ApiNuget
 			$"-p:SolutionDir=\"{slnFolder}\""
 		);
 		var pkgFile = Path.Combine(prj.Folder, "bin", "Debug", $"{prj.Name}.{ver}.nupkg");
-		if (!File.Exists(pkgFile)) throw new ArgumentException($"Did not find the packed file @ '{pkgFile}'");
-		return new PackedPrj(pkgFile);
+		if (!dryRun && !File.Exists(pkgFile)) throw new ArgumentException($"Did not find the packed file @ '{pkgFile}'");
+		return new PackedPrj(prj, pkgFile);
 	}
 
 

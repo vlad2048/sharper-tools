@@ -1,8 +1,8 @@
 <Query Kind="Program">
-  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0\LINQPadExtras.dll</Reference>
+  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
   <NuGetReference>Octokit</NuGetReference>
-  <Namespace>Octokit</Namespace>
   <Namespace>LINQPadExtras</Namespace>
+  <Namespace>Octokit</Namespace>
 </Query>
 
 #load "..\cfg"
@@ -20,7 +20,7 @@ public static class ApiGithub
 	
 	public static void CreateRepo(SlnNfo sln)
 	{
-		Con.Start("Creating ", sln.Name, " GitHub repo");
+		Con.Start("Creating ", sln.Name, " GitHub repo", false);
 		if (DoesRepoExist(sln.Name)) throw new ArgumentException("GitHub repo already exists");
 		var isRepoInited = Directory.GetDirectories(sln.Folder, ".git").Any();
 

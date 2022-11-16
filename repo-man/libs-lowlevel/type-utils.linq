@@ -21,7 +21,7 @@ record Rec(string Name, int Val);
 
 public static class TypeUtils
 {
-	public static dynamic Combine(object item1, object item2)
+	public static dynamic Combine(object item1, object item2, params string[] exceptions)
 	{
 		var dictionary1 = (IDictionary<string, object>)item1.ToDynamic()!;
 		var dictionary2 = (IDictionary<string, object>)item2.ToDynamic()!;
@@ -30,7 +30,8 @@ public static class TypeUtils
 
 		foreach (var pair in dictionary1.Concat(dictionary2))
 		{
-			d[pair.Key] = pair.Value;
+			if (!exceptions.Contains(pair.Key))
+				d[pair.Key] = pair.Value;
 		}
 
 		return result;

@@ -1,26 +1,28 @@
 <Query Kind="Program">
-  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0\LINQPadExtras.dll</Reference>
+  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
+  <NuGetReference>DynamicData</NuGetReference>
   <NuGetReference>NuGet.Protocol</NuGetReference>
   <NuGetReference>Octokit</NuGetReference>
   <Namespace>LINQPad.Controls</Namespace>
   <Namespace>LINQPadExtras</Namespace>
+  <Namespace>LINQPadExtras.Styling</Namespace>
+  <Namespace>NuGet.Common</Namespace>
+  <Namespace>NuGet.Configuration</Namespace>
+  <Namespace>NuGet.Protocol</Namespace>
+  <Namespace>NuGet.Protocol.Core.Types</Namespace>
   <Namespace>Octokit</Namespace>
   <Namespace>PowBasics.CollectionsExt</Namespace>
   <Namespace>PowMaybe</Namespace>
   <Namespace>PowRxVar</Namespace>
+  <Namespace>PowRxVar.Utils</Namespace>
   <Namespace>System.Reactive</Namespace>
-  <Namespace>System.Reactive.Linq</Namespace>
-  <Namespace>NuGet.Configuration</Namespace>
-  <Namespace>NuGet.Protocol.Core.Types</Namespace>
-  <Namespace>NuGet.Protocol</Namespace>
-  <Namespace>NuGet.Common</Namespace>
-  <Namespace>LINQPadExtras.Styling</Namespace>
-  <Namespace>System.Reactive.Subjects</Namespace>
+  <Namespace>System.Reactive.Concurrency</Namespace>
   <Namespace>System.Reactive.Disposables</Namespace>
+  <Namespace>System.Reactive.Linq</Namespace>
+  <Namespace>System.Reactive.Subjects</Namespace>
+  <Namespace>System.Threading.Tasks</Namespace>
   <Namespace>System.Windows.Threading</Namespace>
   <Namespace>Windows.UI.Core</Namespace>
-  <Namespace>System.Reactive.Concurrency</Namespace>
-  <Namespace>System.Threading.Tasks</Namespace>
 </Query>
 
 #load ".\cfg"
@@ -35,8 +37,6 @@
 #load ".\libs\structs"
 
 // TODOs:
-//   - Check folder locks before releasing
-//   - sln is Disposed exception after creating a github repo
 //   - C:\Dev_Nuget\Libs\WinFormsCtrlLibs\_Tools\ColorPicker
 //     wrong nuget package found: https://www.nuget.org/packages/ColorPicker/
 
@@ -55,36 +55,39 @@ Func<Maybe<Sln>, Prj[]> LoadPrjs(IRwVar<double> progress) => maySln =>
 
 void Main()
 {
+	//var a = new SourceCache<SlnNfo, SlnNfo>();
 	Util.CreateSynchronizationContext();
 	Dbg.Init();
 
-	var (refresh, whenRefresh) = RxUtils.MakeRefreshEvent();
+	var (whenRefreshSubj, whenRefresh) = RxEventMaker.Make<Unit>().D(mainD);
 	var progress = ProgressBarMaker.Make("Loading Projects").D(mainD);
+	var dryRun = Var.Make(false).D(mainD);
+	var solutions = Cfg.Solutions.SelectToArray(e => new SlnNfo(e));
 
 	var slnFolder = Var.Make(May.None<SlnNfo>());
-	var sln = slnFolder.SelectVarMayWithRefresh(e => new Sln(e), whenRefresh).D(mainD);
+	var sln = slnFolder.SelectVarMayWithRefresh(e => new Sln(e, whenRefreshSubj), whenRefresh);
 	var prjs = sln.SelectVar(LoadPrjs(progress));
 
-	sln.WhenSome().Select(e => e.WhenRefresh).Switch().Subscribe(_ => refresh()).D(mainD);
-	
+	sln.WhenSome().Select(e => e.WhenRefresh).Switch().ToUnit().Subscribe(whenRefreshSubj).D(mainD);
 
-	UI_SlnBrowser(slnFolder, progress).DumpIfNot(slnFolder);
+
+	UI_SlnBrowser(solutions, slnFolder, progress)
+		.ShowWhen(slnFolder.WhenVarNone()).Dump();
+	
 
 	sln.DisplayMay(_sln => new StackPanel(true, ".3em",
 		new DumpContainer(Util.VerticalRun(
 			new Button("Back", _ => slnFolder.V = May.None<SlnNfo>()),
-			UI_Sln(_sln, prjs)
-		)),
+			UI_Sln(_sln, prjs, dryRun)
+		)).Set("width", Con.IsInCmd.SelectVar(e => e ? "200px" : "auto")),
 		Con.Root
 	).StyleSideBySide()).Dump();
 	
 	sln.DisposeManyMay().D(mainD);
 }
 
-
-object UI_SlnBrowser(IRwVar<Maybe<SlnNfo>> slnFolder, IRwVar<double> progress) =>
-	Cfg.Solutions
-		.SelectToArray(e => new SlnNfo(e))
+object UI_SlnBrowser(SlnNfo[] solutions, IRwVar<Maybe<SlnNfo>> slnFolder, IRwVar<double> progress) =>
+	solutions
 		.SelectWithProgress(progress, SlnComputed.Retrieve)
 		.Select(e => TypeUtils.Combine(
 			new { Solution = new Hyperlink(e.Nfo.Name, _ => slnFolder.V = May.Some(e.Nfo)) },
@@ -92,18 +95,19 @@ object UI_SlnBrowser(IRwVar<Maybe<SlnNfo>> slnFolder, IRwVar<double> progress) =
 		));
 
 
-Control UI_Sln(Sln sln, IRoVar<Prj[]> prjsV) =>
+Control UI_Sln(Sln sln, IRoVar<Prj[]> prjsV, IRwVar<bool> dryRun) =>
 	new DumpContainer(
 		Util.VerticalRun(
 			UI_Sln_Github(sln),
 			UI_Sln_Solution(sln),
 			UI_Sln_Version(sln),
-			new FieldSet("Projects", new DumpContainer(
-				prjsV.Display(prjs => prjs.Select(UI_Sln_Prj))
-			)),
-			new FieldSet("Ignored Projects", new DumpContainer(
+			Html.FieldSet("Projects", new StackPanel(false,
+				Html.CheckBox("Dry run", dryRun),
+				prjsV.DisplayArr(prj => UI_Sln_Prj(prj, dryRun)))
+			),
+			Html.FieldSet("Ignored Projects",
 				sln.Computed.IgnoredPrjs.Select(prj => new Hyperlink(prj.Name, _ => Xml.SetFlag(prj.File, XmlFlag.IsPackable, true)))
-			))
+			)
 		)
 	);
 
@@ -130,11 +134,9 @@ object UI_Sln_Computed(SlnComputed sln) => new
 };
 
 
-Control UI_Sln_Solution(Sln sln) => new FieldSet("Solution", new DumpContainer(
-	Util.Pivot(UI_Sln_Computed(sln.Computed))
-));
+Control UI_Sln_Solution(Sln sln) => Html.FieldSet("Solution", Util.Pivot(UI_Sln_Computed(sln.Computed)));
 
-object UI_Sln_Github(Sln sln) => new FieldSet("GitHub", sln.Computed.HasGitHub switch
+object UI_Sln_Github(Sln sln) => Html.FieldSet("GitHub", sln.Computed.HasGitHub switch
 {
 	true => new Hyperlink(sln.Nfo.GitHubUrl, sln.Nfo.GitHubUrl),
 	false => new Button("Create GitHub repo", _ => { ApiGithub.CreateRepo(sln.Nfo); sln.Refresh(); })
@@ -143,22 +145,22 @@ object UI_Sln_Github(Sln sln) => new FieldSet("GitHub", sln.Computed.HasGitHub s
 object UI_Sln_Version(Sln sln)
 {
 	var textBox = new TextBox(sln.Version);
-	return new FieldSet("Version",
+	return Html.FieldSet("Version",
 		textBox,
 		new Button("Update", _ => Xml.Mod(sln.Nfo.DirectoryBuildPropsFile, mod => mod.Set(XmlPaths.Version, textBox.Text)))
 	);
 }
 
-object UI_Sln_Prj(Prj prj) =>
+object UI_Sln_Prj(Prj prj, IRoVar<bool> dryRun) =>
 	new
 	{
 		Project = prj.Name,
 		Local = Util.HorizontalRun(true,
-			new Button("Release Locally", _ => { ApiNuget.ReleaseLocally(prj.Sln.Folder, prj.Nfo, prj.Version); prj.Refresh(); }),
+			new Button("Release Locally", _ => { ApiNuget.ReleaseLocally(prj.Sln.Folder, prj.Nfo, prj.Version, dryRun.V); prj.Refresh(); }),
 			$"last: {prj.Computed.LastLocalVer}"
 		),
 		Remote = Util.HorizontalRun(true,
-			new Button("Release to Nuget", _ => { ApiNuget.ReleaseToNuget(prj.Sln.Folder, prj.Nfo, prj.Version, prj.NugetUrl); prj.Refresh(); })
+			new Button("Release to Nuget", _ => { ApiNuget.ReleaseToNuget(prj.Sln.Folder, prj.Nfo, prj.Version, prj.NugetUrl, dryRun.V); prj.Refresh(); })
 			{ Enabled = !prj.Computed.IsVerOnNuget },
 			$"last: {prj.Computed.LastRemoteVer}"
 		),
@@ -180,22 +182,32 @@ object UI_Sln_Prj(Prj prj) =>
 
 static class DisplayUtils
 {
-	public static object DisplayMay<T>(this IRoVar<Maybe<T>> mayVarVal, Func<T, object> dispFun) =>
-		mayVarVal.Display(mayVal => mayVal.IsSome(out var val) switch
-		{
-			true => dispFun(val),
-			false => string.Empty
-		});
-
-	public static object Display<T>(this IRoVar<T> valVar, Func<T, object> dispFun)
+	public static DumpContainer DisplayArr<T>(this IRoVar<T[]> valVar, Func<T, object> dispFun)
 	{
 		var dc = new DumpContainer();
 		valVar
-			.ObserveOnUIThread()
-			.Subscribe(val => dc.UpdateContent(dispFun(val))).D(valVar);
+			//.ObserveOnUIThread()
+			.Subscribe(arr => dc.UpdateContent(arr.Select(dispFun))).D(valVar);
 		return dc;
 	}
 
+	public static DumpContainer DisplayMay<T>(this IRoVar<Maybe<T>> valVar, Func<T, object> dispFun)
+	{
+		var dc = new DumpContainer();
+		valVar
+			.WhenSome()
+			.Subscribe(val => dc.UpdateContent(dispFun(val))).D(valVar);
+		return dc
+			.ShowWhen(valVar.WhenVarSome());
+	}
+	
+	public static DumpContainer ShowWhen(this object obj, IRoVar<bool> predicate)
+	{
+		var dc = new DumpContainer(obj);
+		predicate.Subscribe(e => dc.Style = e ? "" : "display:none").D(predicate);
+		return dc;
+	}
+	
 	public static void DumpIfNot<T>(this object obj, IRoVar<Maybe<T>> mayVar)
 	{
 		var dc = new DumpContainer(obj).Dump();
@@ -256,9 +268,24 @@ internal static class UI
 
 static class StyleExt
 {
+	public static DumpContainer Set(this DumpContainer dc, string key, IRoVar<string> val)
+	{
+		val.Subscribe(v => dc.Set(key, v)).D(mainD);
+		return dc;
+	}
+	
+	/*public static C Set<C>(this C ctrl, string key, IRoVar<string> val) where C : Control
+	{
+		val.Subscribe(v => ctrl.Set(key, v)).D(mainD);
+		return ctrl;
+	}*/
+	
 	public static Control StyleSideBySide(this Control ctrl) =>
 		ctrl
 			.Set("display", "flex");
+			/*.Set("white-space", "auto")
+			.Set("display", "grid")
+			.Set("grid-template-columns", "1fr 3fr");*/
 	
 	public static Control MarginLeft(this Control ctrl) =>
 		ctrl
@@ -295,63 +322,7 @@ static class RxUtils
 		progress.V = 1;
 		return res;
 	}
-
-	public static (Action, IObservable<Unit>) MakeRefreshEvent()
-	{
-		var whenRefresh = new Subject<Unit>();
-		return (
-			() => whenRefresh.OnNext(Unit.Default),
-			whenRefresh.AsObservable()
-		);
-	}
 	
-	public static (Action, IRoVar<int>) MakeRefreshEventVar()
-	{
-		var whenRefresh = new Subject<Unit>();
-		var idx = 0;
-		var refreshVar = Var.Make(idx++, whenRefresh.AsObservable().Select(_ => idx++)).D(mainD);
-
-		return (
-			() => whenRefresh.OnNext(Unit.Default),
-			refreshVar
-		);
-	}
-
-	public static IDisposable DisposeManyMay<T>(this IObservable<Maybe<T>> obs) where T : IDisposable =>
-		obs.CombineWithPrevious()
-			.Where(t => t.Item1.IsSome(out var maySlnPrev) && maySlnPrev.IsSome())
-			.Select(t => t.Item1.Ensure().Ensure())
-			.Subscribe(slnPrev =>
-			{
-				slnPrev.Dispose();
-			});
-
-	public static IObservable<Maybe<U>> SelectMay<T, U>(this IObservable<Maybe<T>> obs, Func<T, U> fun) => obs.Select(e => e.Select(fun));
-
-	private static IObservable<(Maybe<T>, T)> CombineWithPrevious<T>(this IObservable<T> obs) =>
-		obs.Scan<T, (Maybe<T>, Maybe<T>)>(
-			(May.None<T>(), May.None<T>()),
-			(t, v) => (t.Item2, May.Some(v))
-		)
-			.Select(t => (t.Item1, t.Item2.Ensure()));
-
-	public static (IRoVar<Maybe<U>>, IDisposable) SelectVarMayWithRefresh<T, U>(this IRoVar<Maybe<T>> v, Func<T, U> fun, IObservable<Unit> whenRefresh) =>
-		Var.Make(
-			May.None<U>(),
-			Observable.Merge(
-				v.WhenNone()
-					.Select(_ => May.None<T>()),
-				v.WhenSome()
-					.Select(val =>
-						whenRefresh
-							.Prepend(Unit.Default)
-							.Select(_ => May.Some(val))
-					)
-					.Switch()
-			)
-			.Delay(TimeSpan.Zero)
-			.SelectMay(fun)
-		);
 
 	public static IObservable<T> ObserveOnUIThread<T>(this IObservable<T> obs) => obs.ObserveOn(SynchronizationContext.Current!);
 

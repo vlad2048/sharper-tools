@@ -1,8 +1,8 @@
 <Query Kind="Program">
-  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0\LINQPadExtras.dll</Reference>
-  <Namespace>PowRxVar</Namespace>
+  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
   <Namespace>LINQPadExtras</Namespace>
   <Namespace>PowBasics.CollectionsExt</Namespace>
+  <Namespace>PowRxVar</Namespace>
   <Namespace>System.Reactive</Namespace>
   <Namespace>System.Reactive.Linq</Namespace>
   <Namespace>System.Reactive.Subjects</Namespace>
@@ -117,7 +117,7 @@ public class Sln : IDisposable
 	private readonly Disp d = new();
 	public void Dispose() => d.Dispose();
 	
-	private readonly ISubject<Unit> whenRefresh;
+	private readonly ISubject<Unit> whenRefreshSubj;
 
 	// Basic
 	// =====
@@ -131,21 +131,17 @@ public class Sln : IDisposable
 	public string Version => Computed.Version;
 
 	public IObservable<Unit> WhenRefresh { get; }
-	public void Refresh() => whenRefresh.OnNext(Unit.Default);
+	public void Refresh() => whenRefreshSubj.OnNext(Unit.Default);
 
-	public Sln(SlnNfo nfo)
+	public Sln(SlnNfo nfo, ISubject<Unit> whenRefreshSubj)
 	{
 		Nfo = nfo;
+		this.whenRefreshSubj = whenRefreshSubj;
 		Computed = SlnComputed.Retrieve(Nfo);
 
 		var watcher = new FolderWatcher(Folder).D(d);
 
-		whenRefresh = new Subject<Unit>().D(d);
-		WhenRefresh =
-			Observable.Merge(
-				watcher.WhenChange.ToUnit(),
-				whenRefresh.AsObservable()
-			);
+		WhenRefresh = watcher.WhenChange.ToUnit();
 	}
 }
 

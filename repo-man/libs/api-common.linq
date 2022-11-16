@@ -9,6 +9,7 @@ public record PrjNfo(string File)
 {
 	public string Folder => Path.GetDirectoryName(File)!;
 	public string Name => Path.GetFileNameWithoutExtension(File);
+	public string NameLower => Name.ToLowerInvariant();
 	public string NugetUrl => $"https://www.nuget.org/packages/{Name}/";
 }
 

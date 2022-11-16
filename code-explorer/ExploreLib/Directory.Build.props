@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>preview</LangVersion>
+    <EnablePreviewFeatures>True</EnablePreviewFeatures>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DebugType>embedded</DebugType>
+    
+    <Version>0.0.1</Version>
+    
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Authors>vlad2048</Authors>
+    
+    <Description>ExploreLib</Description>
+
+  </PropertyGroup>
+
+</Project>

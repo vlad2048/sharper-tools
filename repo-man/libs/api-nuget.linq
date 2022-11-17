@@ -18,9 +18,9 @@
 
 void Main()
 {
-	var p = "PowBasics";
-	var prj = new PrjNfo(@"C:\Dev_Nuget\Libs\PowBasics\Libs\PowBasics\PowBasics.csproj");
-	ApiNuget.GetLastRemoteVer(prj).Dump();
+	//var p = "PowBasics";
+	//var prj = new PrjNfo(@"C:\Dev_Nuget\Libs\PowBasics\Libs\PowBasics\PowBasics.csproj");
+	//ApiNuget.GetLastRemoteVer(prj).Dump();
 	//ApiNuget.DoesPkgExist(p).Dump();
 	//ApiNuget.GetRemoteVers(p).Dump();
 	

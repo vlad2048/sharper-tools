@@ -23,10 +23,10 @@
   <Namespace>System.Threading.Tasks</Namespace>
   <Namespace>System.Windows.Threading</Namespace>
   <Namespace>Windows.UI.Core</Namespace>
+  <Namespace>DynamicData</Namespace>
 </Query>
 
 #load ".\cfg"
-#load ".\libs-lowlevel\type-utils"
 #load ".\libs-lowlevel\xml"
 #load ".\libs-lowlevel\watcher"
 #load ".\libs\api-common"
@@ -37,81 +37,151 @@
 #load ".\libs\structs"
 
 // TODOs:
+//   - Add GitHub link to SlnDetails
 //   - C:\Dev_Nuget\Libs\WinFormsCtrlLibs\_Tools\ColorPicker
 //     wrong nuget package found: https://www.nuget.org/packages/ColorPicker/
 
 public static readonly Disp mainD = new();
 
 
-Func<Maybe<Sln>, Prj[]> LoadPrjs(IRwVar<double> progress) => maySln =>
-	(maySln.IsSome(out var sln) switch
-	{
-		true => sln.Computed.Prjs,
-		false => Array.Empty<PrjNfo>()
-	})
-		.SelectWithProgress(progress, prjNfo => new Prj(prjNfo, sln));
-
-
-
 void Main()
 {
-	//var a = new SourceCache<SlnNfo, SlnNfo>();
-	Util.CreateSynchronizationContext();
-	Dbg.Init();
-
-	var (whenRefreshSubj, whenRefresh) = RxEventMaker.Make<Unit>().D(mainD);
+	DisplayUtils.Init();
 	var progress = ProgressBarMaker.Make("Loading Projects").D(mainD);
 	var dryRun = Var.Make(false).D(mainD);
-	var solutions = Cfg.Solutions.SelectToArray(e => new SlnNfo(e));
 
-	var slnFolder = Var.Make(May.None<SlnNfo>());
-	var sln = slnFolder.SelectVarMayWithRefresh(e => new Sln(e, whenRefreshSubj), whenRefresh);
-	var prjs = sln.SelectVar(LoadPrjs(progress));
+	var solutions = Cfg.Solutions.SelectToArray(e => new Sln(new SlnNfo(e)).D(mainD));
+	var slnWatchers = solutions.Select(sln => new FolderWatcher(sln.Nfo.Folder).D(mainD).WhenChange.Select(_ => sln)).Merge();
+	var (refresh, whenRefresh) = RxUtils.MakeRefreshEvent();
+	var selSln = Var.Make(May.None<Sln>()).D(mainD);
 
-	sln.WhenSome().Select(e => e.WhenRefresh).Switch().ToUnit().Subscribe(whenRefreshSubj).D(mainD);
-
-
-	UI_SlnBrowser(solutions, slnFolder, progress)
-		.ShowWhen(slnFolder.WhenVarNone()).Dump();
+	solutions.Select(e => e.Details).Merge().ToUnit()
+		.Display(_ => solutions.Select(sln => Util.Merge(
+			new { Solution = Html.Hyperlink(sln.Nfo.Name, () => selSln.V = May.Some(sln), sln.Details.WhenVarSome()) },
+			sln.Details.V.IsSome(out var slnDetails) switch
+			{
+				true => UI_Sln_Details(slnDetails),
+				false => new { Version = "_" }
+			}
+		))).D(mainD)
+		.ShowWhen(selSln.WhenVarNone())
+		.Dump();
 	
+	selSln
+		.WhenSome()
+		.Select(sln => sln.Details.Select(e => sln))
+		.Switch()
+		.Where(sln => sln.Details.V.IsSome())
+		.Display(sln => UI_Sln(sln.Nfo, sln.Details.V.Ensure(), sln.D, selSln, dryRun, () => refresh(sln))).D(mainD)
+		.ShowWhen(selSln.WhenVarSome())
+		.Dump();
 
-	sln.DisplayMay(_sln => new StackPanel(true, ".3em",
-		new DumpContainer(Util.VerticalRun(
-			new Button("Back", _ => slnFolder.V = May.None<SlnNfo>()),
-			UI_Sln(_sln, prjs, dryRun)
-		)).Set("width", Con.IsInCmd.SelectVar(e => e ? "200px" : "auto")),
-		Con.Root
-	).StyleSideBySide()).Dump();
-	
-	sln.DisposeManyMay().D(mainD);
+
+	Task.Run(() => solutions.ForEach(sln => sln.Load()));
+	selSln.WhenSome().Subscribe(sln =>
+	{
+		var slnDetails = sln.Details.V.Ensure();
+		Task.Run(() => slnDetails.Prjs.ForEach(prj => prj.Load(slnDetails.Version)));
+	}).D(mainD);
+	slnWatchers.Merge(whenRefresh.Where(_ => !dryRun.V)).Subscribe(sln =>
+	{
+		sln.Load();
+		var slnDetails = sln.Details.V.Ensure();
+		Task.Run(() => slnDetails.Prjs.ForEach(prj => prj.Load(slnDetails.Version)));
+	}).D(mainD);
 }
 
-object UI_SlnBrowser(SlnNfo[] solutions, IRwVar<Maybe<SlnNfo>> slnFolder, IRwVar<double> progress) =>
-	solutions
-		.SelectWithProgress(progress, SlnComputed.Retrieve)
-		.Select(e => TypeUtils.Combine(
-			new { Solution = new Hyperlink(e.Nfo.Name, _ => slnFolder.V = May.Some(e.Nfo)) },
-			UI_Sln_Computed(e)
-		));
 
-
-Control UI_Sln(Sln sln, IRoVar<Prj[]> prjsV, IRwVar<bool> dryRun) =>
-	new DumpContainer(
-		Util.VerticalRun(
-			UI_Sln_Github(sln),
-			UI_Sln_Solution(sln),
-			UI_Sln_Version(sln),
+object UI_Sln(SlnNfo nfo, SlnDetails details, IRoDispBase slnD, IRwVar<Maybe<Sln>> selSln, IRwVar<bool> dryRun, Action refresh) => new StackPanel(true, ".3em",
+		new DumpContainer(Util.VerticalRun(
+			new Button("Back", _ => selSln.V = May.None<Sln>()),
+			UI_Sln_Github(details, refresh),
+			UI_Sln_Solution(details),
+			UI_Sln_Version(details),
 			Html.FieldSet("Projects", new StackPanel(false,
 				Html.CheckBox("Dry run", dryRun),
-				prjsV.DisplayArr(prj => UI_Sln_Prj(prj, dryRun)))
-			),
+				details.Prjs.Select(e => e.Details).Merge().ToUnit()
+					.Display(_ => details.Prjs.Select(prj => Util.Merge(
+						new { Project = prj.Nfo.Name },
+						prj.Details.V.IsSome(out var prjDetails) switch
+						{
+							true => UI_Sln_Prj(prjDetails, dryRun, refresh),
+							false => new { Local = "_" }
+						}
+					))).D(slnD)
+			)),
 			Html.FieldSet("Ignored Projects",
-				sln.Computed.IgnoredPrjs.Select(prj => new Hyperlink(prj.Name, _ => Xml.SetFlag(prj.File, XmlFlag.IsPackable, true)))
+				details.IgnoredPrjs.Select(prj => new Hyperlink(prj.Name, _ => Xml.Mod(prj.File, mod =>
+				{
+					mod.SetFlag(XmlFlag.IsPackable, true);
+					mod.SetFlag(XmlFlag.GenerateDocumentationFile, true);
+				})))
 			)
+		)),
+		Con.Root
+	).StyleSideBySide();
+
+
+
+
+object UI_Sln_Prj(PrjDetails prjDetails, IRoVar<bool> dryRun, Action refresh) =>
+	new
+	{
+		Local = Util.HorizontalRun(true,
+			new Button("Release Locally", _ => { ApiNuget.ReleaseLocally(prjDetails.Sln.Folder, prjDetails.Nfo, prjDetails.Version, dryRun.V); refresh(); }),
+			$"last: {prjDetails.LastLocalVer}"
+		),
+		Remote = Util.HorizontalRun(true,
+			new Button("Release to Nuget", _ => { ApiNuget.ReleaseToNuget(prjDetails.Sln.Folder, prjDetails.Nfo, prjDetails.Version, prjDetails.Nfo.NugetUrl, dryRun.V); refresh(); })
+			{ Enabled = !prjDetails.IsVerOnNuget },
+			$"last: {prjDetails.LastRemoteVer}"
+		),
+		Nuget = prjDetails.HasNuget switch
+		{
+			true => new Hyperlinq(prjDetails.Nfo.NugetUrl, "nuget"),
+			false => null
+		},
+		Times = new
+		{
+			Project = UI.MkLabel(prjDetails.TimePrj.FmtTime()).StylePrjTime(),
+			Local = UI.MkFlagLabel(prjDetails.TimeLocal.FmtTime(), prjDetails.IsTimeLocalUpToDate),
+			Remote = UI.MkFlagLabel(prjDetails.TimeRemote.FmtTime(), prjDetails.IsTimeRemoteUpToDate),
+		},
+		Ignore = new Button("Ignore", _ => Xml.Mod(prjDetails.Nfo.File, mod =>
+		{
+			mod.SetFlag(XmlFlag.IsPackable, false);
+			mod.SetFlag(XmlFlag.GenerateDocumentationFile, false);
+		})),
+	};
+
+
+
+
+
+
+object UI_Sln_Github(SlnDetails sln, Action refresh) => Html.FieldSet("GitHub", sln.HasGitHub switch
+{
+	true => new Hyperlink(sln.Nfo.GitHubUrl, sln.Nfo.GitHubUrl),
+	false => new Button("Create GitHub repo", _ => { ApiGithub.CreateRepo(sln.Nfo); refresh(); })
+});
+
+Control UI_Sln_Solution(SlnDetails sln) => Html.FieldSet("Solution", Util.Pivot(UI_Sln_Details(sln)));
+
+object UI_Sln_Version(SlnDetails sln)
+{
+	var textBox = new TextBox(sln.Version);
+	return Html.FieldSet("Version",
+		Util.HorizontalRun(true,
+			textBox,
+			new Button("Update", _ => Xml.Mod(sln.Nfo.DirectoryBuildPropsFile, mod => mod.Set(XmlPaths.Version, textBox.Text)))
 		)
 	);
+}
 
-object UI_Sln_Computed(SlnComputed sln) => new
+
+
+
+object UI_Sln_Details(SlnDetails sln) => new
 {
 	Version = sln.Version,
 	Links = new StackPanel(true,
@@ -127,96 +197,50 @@ object UI_Sln_Computed(SlnComputed sln) => new
 		true => (object)UI.MkGreenLabel("normalized"),
 		false => new StackPanel(true,
 			new Button("Normalize", _ => sln.Norm.Apply())
-				{ Enabled = GitEnumUtils.IsNormEnabled(sln.Norm.IsEmpty, sln.GitStatus, sln.GitTrackingStatus) },
+			{ Enabled = GitEnumUtils.IsNormEnabled(sln.Norm.IsEmpty, sln.GitStatus, sln.GitTrackingStatus) },
 			UI.MkRedLabel(GitEnumUtils.FmtNorm(sln.Norm.IsEmpty, sln.GitStatus, sln.GitTrackingStatus))
 		)
 	}
 };
 
 
-Control UI_Sln_Solution(Sln sln) => Html.FieldSet("Solution", Util.Pivot(UI_Sln_Computed(sln.Computed)));
 
-object UI_Sln_Github(Sln sln) => Html.FieldSet("GitHub", sln.Computed.HasGitHub switch
-{
-	true => new Hyperlink(sln.Nfo.GitHubUrl, sln.Nfo.GitHubUrl),
-	false => new Button("Create GitHub repo", _ => { ApiGithub.CreateRepo(sln.Nfo); sln.Refresh(); })
-});
 
-object UI_Sln_Version(Sln sln)
-{
-	var textBox = new TextBox(sln.Version);
-	return Html.FieldSet("Version",
-		textBox,
-		new Button("Update", _ => Xml.Mod(sln.Nfo.DirectoryBuildPropsFile, mod => mod.Set(XmlPaths.Version, textBox.Text)))
-	);
-}
-
-object UI_Sln_Prj(Prj prj, IRoVar<bool> dryRun) =>
-	new
-	{
-		Project = prj.Name,
-		Local = Util.HorizontalRun(true,
-			new Button("Release Locally", _ => { ApiNuget.ReleaseLocally(prj.Sln.Folder, prj.Nfo, prj.Version, dryRun.V); prj.Refresh(); }),
-			$"last: {prj.Computed.LastLocalVer}"
-		),
-		Remote = Util.HorizontalRun(true,
-			new Button("Release to Nuget", _ => { ApiNuget.ReleaseToNuget(prj.Sln.Folder, prj.Nfo, prj.Version, prj.NugetUrl, dryRun.V); prj.Refresh(); })
-			{ Enabled = !prj.Computed.IsVerOnNuget },
-			$"last: {prj.Computed.LastRemoteVer}"
-		),
-		Nuget = prj.Computed.HasNuget switch
-		{
-			true => new Hyperlinq(prj.NugetUrl),
-			false => null
-		},
-		Times = new
-		{
-			Project = UI.MkLabel(prj.Computed.TimePrj.FmtTime()).StylePrjTime(),
-			Local = UI.MkFlagLabel(prj.Computed.TimeLocal.FmtTime(), prj.Computed.IsTimeLocalUpToDate),
-			Remote = UI.MkFlagLabel(prj.Computed.TimeRemote.FmtTime(), prj.Computed.IsTimeRemoteUpToDate),
-		},
-		Ignore = new Button("Ignore", _ => Xml.SetFlag(prj.File, XmlFlag.IsPackable, false)),
-	};
 
 
 
 static class DisplayUtils
 {
-	public static DumpContainer DisplayArr<T>(this IRoVar<T[]> valVar, Func<T, object> dispFun)
+	public static void Init() => Util.HtmlHead.AddStyles("""
+		thead>tr:first-of-type {
+			display: none;
+		}
+		td {
+			vertical-align: middle;
+		}
+		legend {
+			background: transparent;
+		}
+		"""
+	);
+
+	public static (DumpContainer, IDisposable) Display<T>(this IObservable<T> valObs, Func<T, object> dispFun)
 	{
 		var dc = new DumpContainer();
-		valVar
-			//.ObserveOnUIThread()
-			.Subscribe(arr => dc.UpdateContent(arr.Select(dispFun))).D(valVar);
-		return dc;
+		var d = new Disp();
+		valObs
+			.Subscribe(val => dc.UpdateContent(dispFun(val))).D(d);
+		return (dc, d);
 	}
 
-	public static DumpContainer DisplayMay<T>(this IRoVar<Maybe<T>> valVar, Func<T, object> dispFun)
-	{
-		var dc = new DumpContainer();
-		valVar
-			.WhenSome()
-			.Subscribe(val => dc.UpdateContent(dispFun(val))).D(valVar);
-		return dc
-			.ShowWhen(valVar.WhenVarSome());
-	}
-	
 	public static DumpContainer ShowWhen(this object obj, IRoVar<bool> predicate)
 	{
 		var dc = new DumpContainer(obj);
 		predicate.Subscribe(e => dc.Style = e ? "" : "display:none").D(predicate);
 		return dc;
 	}
-	
-	public static void DumpIfNot<T>(this object obj, IRoVar<Maybe<T>> mayVar)
-	{
-		var dc = new DumpContainer(obj).Dump();
-		mayVar
-			.Select(e => e.IsNone())
-			.ObserveOnUIThread()
-			.Subscribe(e => dc.Style = e ? "" : "display:none").D(mayVar);
-	}
 }
+
 
 
 
@@ -264,37 +288,20 @@ internal static class UI
 	}
 	
 	public static LINQPad.Controls.Label MkLabel(string str) => new(str);
-}
 
-static class StyleExt
-{
-	public static DumpContainer Set(this DumpContainer dc, string key, IRoVar<string> val)
-	{
-		val.Subscribe(v => dc.Set(key, v)).D(mainD);
-		return dc;
-	}
 	
-	/*public static C Set<C>(this C ctrl, string key, IRoVar<string> val) where C : Control
-	{
-		val.Subscribe(v => ctrl.Set(key, v)).D(mainD);
-		return ctrl;
-	}*/
 	
-	public static Control StyleSideBySide(this Control ctrl) =>
-		ctrl
-			.Set("display", "flex");
-			/*.Set("white-space", "auto")
-			.Set("display", "grid")
-			.Set("grid-template-columns", "1fr 3fr");*/
+	public static DumpContainer Set(this DumpContainer dc, string key, IRoVar<string> val) { val.Subscribe(v => dc.Set(key, v)).D(mainD); return dc; }
 	
-	public static Control MarginLeft(this Control ctrl) =>
-		ctrl
-			.Set("margin-left", "40px");
+	public static Control StyleSideBySide(this Control ctrl) => ctrl
+		.Set("display", "flex");
 	
-	public static Control StylePrjTime(this Control ctrl) =>
-		ctrl
-			.SetForeColor(UI.AccentCol)
-			.Set("font-weight", "bold");
+	public static Control MarginLeft(this Control ctrl) => ctrl
+		.Set("margin-left", "40px");
+	
+	public static Control StylePrjTime(this Control ctrl) => ctrl
+		.SetForeColor(UI.AccentCol)
+		.Set("font-weight", "bold");
 
 	public static string FmtTime(this DateTime time) => $"{time}";
 	
@@ -306,77 +313,14 @@ static class StyleExt
 }
 
 
-
 static class RxUtils
 {
-	public static U[] SelectWithProgress<T, U>(this T[] arr, IRwVar<double> progress, Func<T, U> mapFun)
+	public static (Action<Sln>, IObservable<Sln>) MakeRefreshEvent()
 	{
-		progress.V = 0;
-		var res = arr
-			.Select((elt, idx) =>
-			{
-				progress.V = (double)(idx + 1) / arr.Length;
-				return mapFun(elt);
-			})
-			.ToArray();
-		progress.V = 1;
-		return res;
+		ISubject<Sln> whenRefreshSubj = new Subject<Sln>().D(mainD);
+		return (
+			sln => whenRefreshSubj.OnNext(sln),
+			whenRefreshSubj.AsObservable()
+		);
 	}
-	
-
-	public static IObservable<T> ObserveOnUIThread<T>(this IObservable<T> obs) => obs.ObserveOn(SynchronizationContext.Current!);
-
-
-	public static IRoVar<T> ObserveVarOn<T>(this IRoVar<T> v, IScheduler scheduler) => Var.Make(
-		v.V,
-		v.ObserveOn(scheduler)
-	).D(mainD);
-	
-	public static IRoVar<T> ObserveVarOn<T>(this IRoVar<T> v, SynchronizationContext synchronizationContext) => Var.Make(
-		v.V,
-		v.ObserveOn(synchronizationContext)
-	).D(mainD);
-
-	public static IRoVar<T> ObserveVarOnUIThread<T>(this IRoVar<T> v) => v.ObserveVarOn(SynchronizationContext.Current!);
-	
-	public static IRoVar<T> DelayVar<T>(this IRoVar<T> v, TimeSpan delay) => Var.Make(
-		v.V,
-		v.Delay(delay).Synchronize()
-	).D(mainD);
-
-	public static IRoVar<T> ThrottleVar<T>(this IRoVar<T> v, TimeSpan delay) => Var.Make(
-		v.V,
-		v.Throttle(delay)
-	).D(mainD);
-
-	public static IRoVar<T> SynchronizeVar<T>(this IRoVar<T> v) => Var.Make(
-		v.V,
-		v.Synchronize()
-	).D(mainD);
-
-	public static IRoVar<T> LogV<T>(this IRoVar<T> v, string msg) => Var.Make(
-		v.V,
-		v.Do(_ => Con.Log($"[{DateTime.Now:HH:mm:ss.fff}] {msg}"))
-	).D(mainD);
 }
-
-
-static class Dbg
-{
-	private static DumpContainer dc0 = null!;
-	private static DumpContainer dc1 = null!;
-	public static void Init()
-	{
-		dc0 = new DumpContainer().Dump();
-		dc1 = new DumpContainer().Dump();
-	}
-	public static void Log0(string s) => dc0.UpdateContent(s);
-	public static void Log1(string s) => dc1.UpdateContent(s);
-}
-
-
-
-
-
-
-

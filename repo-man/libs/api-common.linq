@@ -2,16 +2,9 @@
 
 void Main()
 {
-	
+
 }
 
-public record PrjNfo(string File)
-{
-	public string Folder => Path.GetDirectoryName(File)!;
-	public string Name => Path.GetFileNameWithoutExtension(File);
-	public string NameLower => Name.ToLowerInvariant();
-	public string NugetUrl => $"https://www.nuget.org/packages/{Name}/";
-}
 
 public record SlnNfo(string Folder)
 {
@@ -19,6 +12,15 @@ public record SlnNfo(string Folder)
 	public string ReadmeFile => Path.Combine(Folder, "README.md");
 	public string DirectoryBuildPropsFile => Path.Combine(Folder, "Directory.Build.props");
 	public string GitHubUrl => $"https://github.com/vlad2048/{Name}.git";
+}
+
+
+public record PrjNfo(string File, SlnNfo Sln)
+{
+	public string Folder => Path.GetDirectoryName(File)!;
+	public string Name => Path.GetFileNameWithoutExtension(File);
+	public string NameLower => Name.ToLowerInvariant();
+	public string NugetUrl => $"https://www.nuget.org/packages/{Name}/";
 }
 
 

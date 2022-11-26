@@ -33,8 +33,8 @@ void Main()
 	
 	//ReleaseLogic.ReleaseSln(sln, "0.0.6", dryRun); return;
 	
-
-	var releaseNfo = ReleaseLogic.CanRelease(sln);
+	var mayGitState = ApiGit.RetrieveGitState(folder);
+	var releaseNfo = ReleaseLogic.CanRelease(mayGitState, sln);
 	if (!releaseNfo.CanRelease)
 	{
 		$"Cannot release: {releaseNfo.ErrorMessage}".Dump();
@@ -79,9 +79,9 @@ public static class ReleaseLogic
 	}
 	
 	
-	public static ReleaseNfo CanRelease(SlnDetails slnDetails)
+	public static ReleaseNfo CanRelease(Maybe<GitState> mayGitState, SlnDetails slnDetails)
 	{
-		if (slnDetails.GitState.IsNone(out var gitState)) return ReleaseNfo.MakeNo("no git repo");
+		if (mayGitState.IsNone(out var gitState)) return ReleaseNfo.MakeNo("no git repo");
 		if (gitState.FileState != GitFileState.Clean) return ReleaseNfo.MakeNo("pending changes");
 		if (gitState.SyncState != GitSyncState.Clean) return ReleaseNfo.MakeNo("unsynced changes");
 		if (gitState.IsHeadOnTag) return ReleaseNfo.MakeNo("no changes");

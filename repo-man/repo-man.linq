@@ -77,8 +77,22 @@ void Main()
 					},
 					sln.Details.V.IsSome(out var slnDetails, out var slnDetailsErr) switch
 					{
-						true => UI_Sln_Details(slnDetails, showDependencies, () => GetAllSlns(solutions), () => refresh(sln), dryRun),
-						false => new { Version = UI.MkRedLabel(slnDetailsErr) }
+						true => UI_Sln_Details(sln.GitState.V, slnDetails, showDependencies, () => GetAllSlns(solutions), () => refresh(sln), dryRun),
+						false => UtilExtra.MergeOpt(
+							new
+							{
+								Version = UI.MkRedLabel(slnDetailsErr),
+							},
+							sln.GitState.V.IsSome(out var gitState) switch
+							{
+								true => new
+								{
+									GitStatus = UI.MkFlagLabel(gitState.FileState.Fmt(), gitState.FileState == GitFileState.Clean),
+									GitSync = UI.MkFlagLabel(gitState.SyncState.Fmt(), gitState.SyncState == GitSyncState.Clean),
+								},
+								false => null,
+							}
+						)							
 					}
 				))))
 		).D(mainD)
@@ -90,7 +104,7 @@ void Main()
 		.Select(sln => sln.Details.Select(e => sln))
 		.Switch()
 		.Where(sln => sln.Details.V.IsSome())
-		.Display(sln => UI_Sln(sln.Nfo, sln.Details.V.Ensure(), sln.D, selSln, () => GetAllSlns(solutions), () => refresh(sln), showDependencies, dryRun)).D(mainD)
+		.Display(sln => UI_Sln(sln.Nfo, sln.GitState.V, sln.Details.V.Ensure(), sln.D, selSln, () => GetAllSlns(solutions), () => refresh(sln), showDependencies, dryRun)).D(mainD)
 		.ShowWhen(selSln.WhenVarSome())
 		.Dump();
 
@@ -110,10 +124,10 @@ void Main()
 }
 
 
-object UI_Sln(SlnNfo nfo, SlnDetails details, IRoDispBase slnD, IRwVar<Maybe<Sln>> selSln, Func<SlnDetails[]> allSlnsFun, Action refresh, IRoVar<bool> showDependencies, IRwVar<bool> dryRun) =>
+object UI_Sln(SlnNfo nfo, Maybe<GitState> mayGitState, SlnDetails details, IRoDispBase slnD, IRwVar<Maybe<Sln>> selSln, Func<SlnDetails[]> allSlnsFun, Action refresh, IRoVar<bool> showDependencies, IRwVar<bool> dryRun) =>
 		new DumpContainer(Util.VerticalRun(
 			new Button("Back", _ => selSln.V = May.None<Sln>()),
-			UI_Sln_Solution(details, showDependencies, allSlnsFun, refresh, dryRun),
+			UI_Sln_Solution(mayGitState, details, showDependencies, allSlnsFun, refresh, dryRun),
 			UI_Sln_Version(details),
 			Html.FieldSet("Projects",
 				details.Prjs.Select(e => e.Details).Merge().ToUnit()
@@ -171,7 +185,10 @@ object UI_Sln_Prj(PrjDetails prjDetails, IRoVar<bool> dryRun, Action refresh) =>
 
 
 
-Control UI_Sln_Solution(SlnDetails sln, IRoVar<bool> showDependencies, Func<SlnDetails[]> allSlnsFun, Action refresh, IRoVar<bool> dryRun) => Html.FieldSet("Solution", Util.Pivot(UI_Sln_Details(sln, showDependencies, allSlnsFun, refresh, dryRun)));
+Control UI_Sln_Solution(Maybe<GitState> mayGitState, SlnDetails sln, IRoVar<bool> showDependencies, Func<SlnDetails[]> allSlnsFun, Action refresh, IRoVar<bool> dryRun) =>
+	Html.FieldSet("Solution", Util.Pivot(
+		UI_Sln_Details(mayGitState, sln, showDependencies, allSlnsFun, refresh, dryRun)
+	));
 
 object UI_Sln_Version(SlnDetails sln)
 {
@@ -187,16 +204,16 @@ object UI_Sln_Version(SlnDetails sln)
 
 
 
-object UI_Sln_Details(SlnDetails sln, IRoVar<bool> showDependencies, Func<SlnDetails[]> allSlnsFun, Action refresh, IRoVar<bool> dryRun)
+object UI_Sln_Details(Maybe<GitState> mayGitState, SlnDetails sln, IRoVar<bool> showDependencies, Func<SlnDetails[]> allSlnsFun, Action refresh, IRoVar<bool> dryRun)
 {
-	var releaseNfo = ReleaseLogic.CanRelease(sln);
+	var releaseNfo = ReleaseLogic.CanRelease(mayGitState, sln);
 	return UtilExtra.MergeOpt(
 		new
 		{
 			Version = sln.Version.Ver(),
 			Links = new StackPanel(true,
 				UI.MkImgBtn(@"art\link-icons\icon-vs.png", () => Process.Start("explorer", sln.SolutionFile)),
-				sln.GitState.IsSome(out var gitState) ? UI.MkImgBtn(@"art\link-icons\icon-github.png", () => Process.Start(new ProcessStartInfo(gitState.Url) { UseShellExecute = true })) : new Label("")
+				mayGitState.IsSome(out var gitState) ? UI.MkImgBtn(@"art\link-icons\icon-github.png", () => Process.Start(new ProcessStartInfo(gitState.Url) { UseShellExecute = true })) : new Label("")
 			),
 			Dependencies = showDependencies.V switch
 			{
@@ -211,7 +228,7 @@ object UI_Sln_Details(SlnDetails sln, IRoVar<bool> showDependencies, Func<SlnDet
 					}),
 			},
 		},
-		sln.GitState.IsSome(out var git) switch
+		mayGitState.IsSome(out var git) switch
 		{
 			false => new
 			{
@@ -300,7 +317,7 @@ static class EnumUtils
 
 static class UtilExtra
 {
-	public static object MergeOpt(params object[] arr) => Util.Merge(arr.Where(e => e != null).ToArray());
+	public static object MergeOpt(params object?[] arr) => Util.Merge(arr.Where(e => e != null).ToArray());
 }
 
 static class DisplayUtils

@@ -39,18 +39,25 @@ public class Sln : IDisposable
 	public Disp D { get; } = new();
 	public void Dispose() => D.Dispose();
 	
+	private readonly IRwVar<Maybe<GitState>> gitState;
 	private readonly IRwVar<MaybeErr<SlnDetails>> details;
 	
 	public SlnNfo Nfo { get; }
+	public IRoVar<Maybe<GitState>> GitState => gitState;
 	public IRoVar<MaybeErr<SlnDetails>> Details => details;
 	
 	public Sln(SlnNfo nfo)
 	{
 		Nfo = nfo;
+		gitState = Var.Make(May.None<GitState>()).D(D);
 		details = Var.Make(MayErr.None<SlnDetails>("loading")).D(D);
 	}
-	
-	public void Load() => details.V = SlnDetails.Retrieve(Nfo);
+
+	public void Load()
+	{
+		gitState.V = ApiGit.RetrieveGitState(Nfo.Folder);
+		details.V = SlnDetails.Retrieve(Nfo);
+	}
 }
 
 
@@ -81,7 +88,6 @@ public record SlnDetails(
 	SlnNfo Nfo,
 	string Version,
 	string SolutionFile,
-	Maybe<GitState> GitState,
 	Norm Norm,
 	Prj[] Prjs,
 	PrjNfo[] IgnoredPrjs,
@@ -113,7 +119,6 @@ public record SlnDetails(
 			nfo,
 			Xml.Get(nfo.DirectoryBuildPropsFile, XmlPaths.Version),
 			slnFile,
-			ApiGit.RetrieveGitState(nfo.Folder),
 			ApiSolution.GetNorm(nfo.Folder),
 			prjs,
 			prjsIgnored,

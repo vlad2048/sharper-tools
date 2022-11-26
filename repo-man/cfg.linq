@@ -4,7 +4,6 @@ public static class Cfg
 {
 	public static readonly string[] Solutions = {
 		//@"C:\tmp\GitTest",
-		@"C:\Dev\sharper-tools",
 		@"C:\Dev_Nuget\Libs\PowBasics",
 		@"C:\Dev_Nuget\Libs\PowMaybe",
 		@"C:\Dev_Nuget\Libs\PowRxVar",
@@ -14,6 +13,7 @@ public static class Cfg
 		@"C:\Dev_Nuget\Libs\ParserLib",
 		@"C:\Dev_Nuget\Libs\ImdbLib",
 		@"C:\Dev_Nuget\Libs\WinFormsCtrlLibs",
+		@"C:\Dev\sharper-tools",
 	};
 	
 	public static class Git

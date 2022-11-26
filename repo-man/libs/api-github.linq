@@ -3,6 +3,7 @@
   <NuGetReference>Octokit</NuGetReference>
   <Namespace>LINQPadExtras</Namespace>
   <Namespace>Octokit</Namespace>
+  <Namespace>LINQPadExtras.Scripting_Batcher</Namespace>
 </Query>
 
 #load "..\cfg"
@@ -10,7 +11,17 @@
 
 void Main()
 {
+	var sln = new SlnNfo(@"C:\tmp\GitTest");
+	void Check() => $"Repo exists: {ApiGithub.DoesRepoExist(sln.Name)}".Dump();
 	
+	var gitFolder = Path.Combine(sln.Folder, ".git");
+	if (ApiGithub.DoesRepoExist(sln.Name)) ApiGithub.DeleteRepo(sln.Name);
+	//if (Directory.Exists(gitFolder)) Directory.Delete(gitFolder, true);
+	return;
+		
+	Check();
+	ApiGithub.CreateRepo(sln);
+	Check();
 }
 
 
@@ -20,35 +31,56 @@ public static class ApiGithub
 	
 	public static void CreateRepo(SlnNfo sln)
 	{
-		Con.Start("Creating ", sln.Name, " GitHub repo", false);
 		if (DoesRepoExist(sln.Name)) throw new ArgumentException("GitHub repo already exists");
-		var isRepoInited = Directory.GetDirectories(sln.Folder, ".git").Any();
+		
+		var gitUrl = $"https://github.com/vlad2048/{sln.Name}.git";
 
-		if (!File.Exists(sln.ReadmeFile)) File.WriteAllText(sln.ReadmeFile, $"# {sln.Name}");
+		Batcher.Run(
+			false,
+			$"Creating {sln.Name} GitHub repo",
+			cmd =>
+			{
+				var gitFolder = Path.Combine(sln.Folder, ".git");
+				var isRepoInited = Directory.Exists(gitFolder);
+				if (isRepoInited)
+					cmd.Cancel("A git repo already exists in this folder");
+				if (!File.Exists(sln.ReadmeFile)) File.WriteAllText(sln.ReadmeFile, $"# {sln.Name}");
 
-		void RunGitCmd(params string[] args) => Con.RunIn("git", sln.Folder, args);
-		void RunGitCmdLeaveOpen(params string[] args) => Con.RunInLeaveOpen("git", sln.Folder, args);
+				cmd.Cd(sln.Folder);
+				void RunGitCmd(params string[] args) => cmd.Run("git", args);
+				void RunGitCmdLeaveOpen(params string[] args) => cmd.RunLeaveOpen("git", args);
 
-		if (!isRepoInited)
-			RunGitCmd("init");
-		RunGitCmd("add", "*");
-		RunGitCmdLeaveOpen("status");
-		var res = Util.ReadLine("Are you happy with the file list ? ('y' to continue otherwise the script will exit)").ToLowerInvariant().Trim();
-		if (res != "y") Environment.Exit(1);
+				if (!isRepoInited)
+					RunGitCmd("init");
+				RunGitCmd("add", "*");
+				RunGitCmdLeaveOpen("status");
+				
+				cmd.AskConfirmation(
+					"Are you happy with the initial list of files ?",
+					onCancel: () => DeleteFolderTweakPermsIfNeeded(gitFolder)
+				);
+				
+				RunGitCmd("commit", "-m", "Initial commit");
 
-		RunGitCmd("commit", "-m", "Initial commit");
-
-		Client.Repository.Create(new NewRepository(sln.Name)).Wait();
-		RunGitCmd("remote", "add", "origin", sln.GitHubUrl);
-		RunGitCmd("push", "-u", "origin", "master");
-		Con.AddArtifact(sln.GitHubUrl);
-		Con.EndSuccess();
+				Client.Repository.Create(new NewRepository(sln.Name)).Wait();
+				RunGitCmd("remote", "add", "origin", gitUrl);
+				RunGitCmd("push", "-u", "origin", "master");
+				cmd.AddArtifact(gitUrl);
+			}
+		);
 	}
 	
-	public static void DeleteRepo(string name)
+	public static void DeleteRepoAndGitFolder(string name, string folder)
 	{
-		var str = Util.ReadLine($"Are you sure you want to delete the github repo '{name}' ? (y/n)").ToLowerInvariant().Trim();
-		if (str != "y") return;
+		DeleteRepo(name);
+		var gitFolder = Path.Combine(folder, ".git");
+		DeleteFolderTweakPermsIfNeeded(gitFolder);
+	}
+	
+	private static void DeleteRepo(string name)
+	{
+		//var str = Util.ReadLine($"Are you sure you want to delete the github repo '{name}' ? (y/n)").ToLowerInvariant().Trim(); if (str != "y") return;
+		if (name != "GitTest") throw new ArgumentException("As a safety measure, you can only delete a repo named GitTest");
 		Client.Repository.Delete(Cfg.GitHub.Owner, name).Wait();
 	}
 
@@ -61,4 +93,17 @@ public static class ApiGithub
 		Credentials = new Octokit.Credentials(Cfg.GitHub.Token)
 	});
 	private static GitHubClient Client => client.Value;
+	
+	private static void DeleteFolderTweakPermsIfNeeded(string folder)
+	{
+		void Recurse(string f)
+		{
+			var files = Directory.GetFiles(f);
+			var dirs = Directory.GetDirectories(f);
+			foreach (var file in files) File.SetAttributes(file, FileAttributes.Normal);
+			foreach (var dir in dirs) Recurse(dir);
+		}
+		Recurse(folder);
+		Directory.Delete(folder, true);
+	}
 }

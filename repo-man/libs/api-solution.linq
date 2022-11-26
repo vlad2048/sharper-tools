@@ -2,6 +2,7 @@
   <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
   <Namespace>LINQPadExtras</Namespace>
   <Namespace>PowBasics.CollectionsExt</Namespace>
+  <Namespace>LINQPadExtras.Utils</Namespace>
 </Query>
 
 #load "..\cfg"
@@ -26,8 +27,7 @@ void Main()
 	var slnFolder = @"C:\Dev_Nuget\Libs\PowWeb";
 	var norm = ApiSolution.GetNorm(slnFolder);
 	var lines = norm.GetLogChangeLines();
-	lines.Dump();
-	
+	lines.Dump();	
 }
 
 
@@ -91,9 +91,10 @@ public static class ApiSolution
 			};
 			mod.ForceSave();
 			mod.RemoveChildren(P(), baseProps);
+			mod.SetFlag(XmlFlag.GenerateDocumentationFile, false);
 			mod.RemoveFlagsSetToDefaultValues();
 			var isPackable = mod.GetFlag(XmlFlag.IsPackable);
-			if (isPackable) mod.SetFlag(XmlFlag.GenerateDocumentationFile, true);
+			//if (isPackable) mod.SetFlag(XmlFlag.GenerateDocumentationFile, true);
 			var frameworkSrc = mod.GetOpt(P("TargetFramework"));
 			if (frameworkSrc != null)
 				if (frameworkUpgradeMap.TryGetValue(frameworkSrc, out var frameworkDst))

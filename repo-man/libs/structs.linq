@@ -1,12 +1,17 @@
 <Query Kind="Program">
   <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
+  <NuGetReference>Microsoft.Build</NuGetReference>
+  <NuGetReference>PowMaybeErr</NuGetReference>
   <Namespace>LINQPadExtras</Namespace>
+  <Namespace>LINQPadExtras.Utils</Namespace>
+  <Namespace>Microsoft.Build.Construction</Namespace>
   <Namespace>PowBasics.CollectionsExt</Namespace>
+  <Namespace>PowMaybe</Namespace>
   <Namespace>PowRxVar</Namespace>
   <Namespace>System.Reactive</Namespace>
   <Namespace>System.Reactive.Linq</Namespace>
   <Namespace>System.Reactive.Subjects</Namespace>
-  <Namespace>PowMaybe</Namespace>
+  <Namespace>PowMaybeErr</Namespace>
 </Query>
 
 #load "..\cfg"
@@ -20,6 +25,12 @@
 
 void Main()
 {
+	//ApiNuget.GetVers(NugetSource.Local, "powrxvar.maybe").Dump();
+	
+	var sln = SlnDetails.Retrieve(new SlnNfo(@"C:\Dev\sharper-tools"));
+	sln.Dump();
+	
+	//PkgRefUpdater.UpdatePkgRefInSln(sln, "PowRxVar", "0.0.11");
 }
 
 
@@ -28,18 +39,18 @@ public class Sln : IDisposable
 	public Disp D { get; } = new();
 	public void Dispose() => D.Dispose();
 	
-	private readonly IRwVar<Maybe<SlnDetails>> details;
+	private readonly IRwVar<MaybeErr<SlnDetails>> details;
 	
 	public SlnNfo Nfo { get; }
-	public IRoVar<Maybe<SlnDetails>> Details => details;
+	public IRoVar<MaybeErr<SlnDetails>> Details => details;
 	
 	public Sln(SlnNfo nfo)
 	{
 		Nfo = nfo;
-		details = Var.Make(May.None<SlnDetails>()).D(D);
+		details = Var.Make(MayErr.None<SlnDetails>("loading")).D(D);
 	}
 	
-	public void Load() => details.V = May.Some(SlnDetails.Retrieve(Nfo));
+	public void Load() => details.V = SlnDetails.Retrieve(Nfo);
 }
 
 
@@ -64,38 +75,59 @@ public class Prj : IDisposable
 	public void Load(string version) => details.V = May.Some(PrjDetails.Retrieve(Nfo, Sln, version));
 }
 
+public record PkgRef(string Name, string Version);
 
 public record SlnDetails(
 	SlnNfo Nfo,
 	string Version,
 	string SolutionFile,
-	bool HasGitHub,
-	GitStatus GitStatus,
-	GitTrackingStatus GitTrackingStatus,
+	Maybe<GitState> GitState,
 	Norm Norm,
 	Prj[] Prjs,
-	PrjNfo[] IgnoredPrjs
+	PrjNfo[] IgnoredPrjs,
+	PkgRef[] PkgRefs
 )
 {
 	public string Folder => Nfo.Folder;
 
-	public static SlnDetails Retrieve(SlnNfo nfo)
+	public static MaybeErr<SlnDetails> Retrieve(SlnNfo nfo)
 	{
-		var allPrjs = Files.FindRecursively(nfo.Folder, "*.csproj").SelectToArray(e => new PrjNfo(e, nfo));
 		bool IsPackable(PrjNfo prj) => Xml.GetFlag(prj.File, XmlFlag.IsPackable);
-		return new SlnDetails(
+
+		var slnFile = Directory.GetFiles(nfo.Folder, "*.sln").OrderByDescending(e => new FileInfo(e).Length).FirstOrDefault();
+		if (slnFile == null) return MayErr.None<SlnDetails>("no .sln file found");
+		if (!File.Exists(nfo.DirectoryBuildPropsFile)) return MayErr.None<SlnDetails>("Directory.Build.props file not found");
+		
+		var allPrjs = Files.FindRecursively(nfo.Folder, "*.csproj").SelectToArray(e => new PrjNfo(e, nfo));
+		var prjs = allPrjs.Where(IsPackable).SelectToArray(e => new Prj(e, nfo));
+		var prjsIgnored = allPrjs.WhereNotToArray(IsPackable);
+		var pkgRefs = (
+			from prj in prjs
+			from pkgRef in PkgRefReader.Read(prj.Nfo)
+			select pkgRef
+		)
+			.Distinct()
+			.ToArray();
+		
+		return MayErr.Some(new SlnDetails(
 			nfo,
 			Xml.Get(nfo.DirectoryBuildPropsFile, XmlPaths.Version),
-			Directory.GetFiles(nfo.Folder, "*.sln").OrderByDescending(e => new FileInfo(e).Length).First(),
-			ApiGithub.DoesRepoExist(nfo.Name),
-			ApiGit.GetStatus(nfo.Folder),
-			ApiGit.GetTrackingStatus(nfo.Folder),
+			slnFile,
+			ApiGit.RetrieveGitState(nfo.Folder),
 			ApiSolution.GetNorm(nfo.Folder),
-			allPrjs.Where(IsPackable).SelectToArray(e => new Prj(e, nfo)),
-			allPrjs.WhereNotToArray(IsPackable)
-		);
+			prjs,
+			prjsIgnored,
+			pkgRefs
+		));
 	}
 }
+
+public record NugetReleaseConditions(
+	bool NugetIsVersionNotYetReleased,
+	bool GitIsTagNotYetMade,
+	bool GitIsRepoClean,
+	bool GitIsRepoInSync
+);
 
 
 public record PrjDetails(
@@ -118,12 +150,124 @@ public record PrjDetails(
 		nfo,
 		sln,
 		version,
-		ApiNuget.DoesPkgExist(nfo.Name),
-		ApiNuget.DoesPkgVerExist(nfo.Name, version),
-		ApiNuget.GetLastLocalVer(nfo),
-		ApiNuget.GetLastRemoteVer(nfo),
-		ApiSolution.GetPrjTime(nfo),
-		ApiNuget.GetLocalVerTime(nfo, version),
-		ApiNuget.GetRemoteVerTime(nfo, version)
+		HasNuget:		ApiNuget.GetVers(NugetSource.Remote, nfo.Name).Any(),
+		IsVerOnNuget:	ApiNuget.GetVers(NugetSource.Remote, nfo.Name).Contains(version),
+		LastLocalVer:	ApiNuget.GetVers(NugetSource.Local, nfo.Name).FirstOrDefault(),
+		LastRemoteVer:	ApiNuget.GetVers(NugetSource.Remote, nfo.Name).FirstOrDefault(),
+		TimePrj:		ApiSolution.GetPrjTime(nfo),
+		TimeLocal:		ApiNuget.GetVerTimestamp(NugetSource.Local, nfo.Name, version),
+		TimeRemote:		ApiNuget.GetVerTimestamp(NugetSource.Remote, nfo.Name, version)
 	);
 }
+
+
+
+static class PkgRefReader
+{
+	public static PkgRef[] Read(PrjNfo prj)
+	{
+		var root = ProjectRootElement.Open(prj.File)!;
+		var itemGrps = root.ItemGroups.ToArray();
+		var pkgRefs = (
+			from itemGrp in itemGrps
+			from elt in itemGrp.Children
+			where elt is ProjectItemElement
+			let prjElt = (ProjectItemElement)elt
+			where prjElt.ElementName == "PackageReference"
+			where prjElt.Metadata.Any(e => e.Name == "Version")
+			select new PkgRef(
+				prjElt.Include,
+				prjElt.Metadata.First(e => e.Name == "Version").Value
+			)
+		).ToArray();
+		return pkgRefs;
+	}
+}
+
+public static class PkgRefUpdater
+{
+	public static bool DoesPkgNeedUpdating(SlnDetails sln, SlnDetails[] others) =>
+	(
+		from prj in sln.Prjs
+		from other in others
+		where other != sln
+		from pkgRef in other.PkgRefs
+		where pkgRef.Name == prj.Nfo.Name
+		where pkgRef.Version != sln.Version
+		select true
+	).Any();
+	
+	private record UpdateNfo(SlnDetails Sln, string PkgName, string PkgVer);
+	
+	public static void UpdateOthers(SlnDetails sln, SlnDetails[] others)
+	{
+		var updates = (
+			from prj in sln.Prjs
+			from other in others
+			where other != sln
+			from pkgRef in other.PkgRefs
+			where pkgRef.Name == prj.Nfo.Name
+			where pkgRef.Version != sln.Version
+			select new UpdateNfo(other, prj.Nfo.Name, sln.Version)
+		)
+			.Distinct()
+			.ToArray();
+		
+		foreach (var update in updates)
+			UpdatePkgRefInSln(update.Sln, update.PkgName, update.PkgVer);
+	}
+	
+	internal static void UpdatePkgRefInSln(SlnDetails sln, string pkgName, string pkgVer)
+	{
+		var prjFiles = sln.Prjs.Select(e => e.Nfo.File).Concat(sln.IgnoredPrjs.Select(e => e.File)).ToArray();
+		foreach (var prjFile in prjFiles)
+			UpdatePkgRefInPrj(prjFile, pkgName, pkgVer);
+	}
+
+	private static void UpdatePkgRefInPrj(string prjFile, string pkgName, string pkgVer)
+	{
+		prjFile.Dump();
+		var root = ProjectRootElement.Open(prjFile)!;
+		var itemGrps = root.ItemGroups.ToArray();
+		var pkgRefs = (
+			from itemGrp in itemGrps
+			from elt in itemGrp.Children
+			where elt is ProjectItemElement
+			let prjElt = (ProjectItemElement)elt
+			where prjElt.ElementName == "PackageReference"
+			where prjElt.Include == pkgName
+			select prjElt
+		).ToArray();
+		
+		foreach (var pkgRef in pkgRefs)
+		{
+			var verElt = pkgRef.Metadata.FirstOrDefault(e => e.Name == "Version");
+			if (verElt != null)
+				verElt.Value = pkgVer;
+		}
+		
+		root.Save();
+
+		var str = Xml.ModSaveToString(prjFile, mod => {
+			mod.SetFlag(XmlFlag.GenerateDocumentationFile, false);
+		});
+		File.WriteAllText(prjFile, str);
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

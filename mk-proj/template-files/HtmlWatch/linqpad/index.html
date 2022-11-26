@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<!-- saved from url=(0070)file:///C:/Users/vlad/AppData/Local/Temp/LINQPad7/_snhdcvhb/query.html -->
+<html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="Generator" content="github.com/hyperlinq/hyperlinq">
+  <link rel="stylesheet" href="linqpad.css"/>
+  <link rel="stylesheet" href="extra.css"/>
+  <script language="JavaScript" type="text/javascript">
+    function toggle(id) {
+      var table = document.getElementById(id);
+      if (table == null) return false;
+      var updown = document.getElementById(id + 'ud');
+      if (updown == null) return false;
+      var expand = updown.className == 'arrow-down';
+      updown.className = expand ? 'arrow-up' : 'arrow-down';
+      table.style.borderBottomStyle = expand ? 'solid' : 'dashed';
+      if (table.rows.length < 2 || table.tBodies.length == 0) return false;
+      table.tBodies[0].style.display = expand ? '' : 'none';
+      if (table.tHead.rows.length == 2 && !table.tHead.rows[1].id.startsWith('sum'))
+        table.tHead.rows[1].style.display = expand ? '' : 'none';
+      if (table.tFoot != null)
+        table.tFoot.style.display = expand ? '' : 'none';
+      if (expand)
+        table.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return false;
+    }
+  </script>
+</head>
+
+<body onload="external.log = msg =&gt; window.chrome.webview.postMessage ([&#39;log&#39;, msg?.toString()]);
+external.write = msg =&gt; window.chrome.webview.postMessage ([&#39;write&#39;, msg?.toString()]);
+external.writeLine = msg =&gt; window.chrome.webview.postMessage ([&#39;writeLine&#39;, msg?.toString()]);">
+  <div id="final">
+    <div class="spacer">
+      <table id="t1">
+        <thead>
+          <tr>
+            <td class="typeheader" colspan="1"><a class="typeheader" onclick="return toggle(&#39;t1&#39;);"><span
+                  class="arrow-up" id="t1ud"></span>IEnumerable&lt;String&gt; (15 items)</a><a class="extenser"
+                onclick="window.chrome.webview.postMessage([&#39;CustomClick&#39;,&#39;0&#39;,&#39;t1&#39;,&#39;&#39;,false]); return false;"><span
+                  class="extenser">•••</span></a></td>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>english 0</td>
+          </tr>
+          <tr>
+            <td>english 1</td>
+          </tr>
+          <tr>
+            <td>english 2</td>
+          </tr>
+          <tr>
+            <td>english 3</td>
+          </tr>
+          <tr>
+            <td>english 4</td>
+          </tr>
+          <tr>
+            <td>english 5</td>
+          </tr>
+          <tr>
+            <td>english 6</td>
+          </tr>
+          <tr>
+            <td>english 7</td>
+          </tr>
+          <tr>
+            <td>english 8</td>
+          </tr>
+          <tr>
+            <td>english 9</td>
+          </tr>
+          <tr>
+            <td>english 10</td>
+          </tr>
+          <tr>
+            <td>english 11</td>
+          </tr>
+          <tr>
+            <td>english 12</td>
+          </tr>
+          <tr>
+            <td>english 13</td>
+          </tr>
+          <tr>
+            <td>english 14</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+
+</html>

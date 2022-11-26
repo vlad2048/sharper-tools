@@ -1,20 +1,191 @@
 <Query Kind="Program">
   <NuGetReference>LibGit2Sharp</NuGetReference>
+  <NuGetReference>PowMaybe</NuGetReference>
   <Namespace>LibGit2Sharp</Namespace>
+  <Namespace>LibGit2Sharp.Handlers</Namespace>
+  <Namespace>PowMaybe</Namespace>
 </Query>
+
+#load "..\cfg"
 
 void Main()
 {
-	var folder = @"C:\Dev_Nuget\Libs\PowBasics";
-	ApiGit.GetStatus(folder).Dump();
-	ApiGit.GetTrackingStatus(folder).Dump();
+	//ApiGit.RetrieveGitState(@"C:\tmp\GitTest").Dump();
 	
-	/*var repo = new Repository(folder);
-	var aheadBy = repo.Head.TrackingDetails.AheadBy;
-	var behindBy = repo.Head.TrackingDetails.BehindBy;
-	$"aheadBy :{aheadBy}".Dump();
-	$"behindBy:{behindBy}".Dump();*/
+	ApiGit.AddAndPush(@"C:\Dev_Nuget\Libs\LINQPadExtras", "0.0.6");
 }
+
+
+public record GitState(
+	string Url,
+	GitFileState FileState,
+	GitSyncState SyncState,
+	bool IsHeadOnTag,
+	string[] TaggedVersions
+);
+
+
+public static class ApiGit
+{
+	private static string ToCanonical(this string tagName) => $"refs/tags/{tagName}";
+	private static readonly HashSet<string> tagsFetchedSet = new();
+	
+
+	public static string GetVersionTagName(string version) => $"v{version}";
+	
+	public static Maybe<GitState> RetrieveGitState(string folder) =>
+		from url in ApiGit.GetRepoUrl(folder)
+		select new GitState(
+			url,
+			GetFileState(folder),
+			GetSyncState(folder),
+			GetIsHeadOnTag(folder),
+			GetTaggedVersions(folder)
+		);
+		
+
+	public static void CreateVersionTag(string folder, string version)
+	{
+		var repo = new Repository(folder);
+		var tagName = GetVersionTagName(version);
+		var canTagName = tagName.ToCanonical();
+		var sig = MakeSignature();
+		// git tag -a v0.0.1 -m "v0.0.1"
+		// git push origin refs/tags/v0.0.1
+		// git tag -d v0.0.1
+		var tag = repo.ApplyTag(tagName, sig, tagName);
+		repo.Push(canTagName);
+	}
+	
+	
+	public static void AddAndPush(string folder, string commitMessage)
+	{
+		var repo = new Repository(folder);
+		Commands.Stage(repo, "*");
+		var sig = MakeSignature();
+		repo.Commit(commitMessage, sig, sig);
+		repo.Push(repo.Head.CanonicalName);
+	}
+	
+
+	public static IgnoreSet GetIgnoreSetOpt(string folder) => IsRepo(folder) switch
+	{
+		true => GetIgnoreSet(folder),
+		false => IgnoreSet.Empty,
+	};
+	
+	
+	
+	private static Repository FetchTags(this string folder)
+	{
+		var repo = new Repository(folder);
+		if (tagsFetchedSet.Contains(folder)) return repo;
+		var remote = repo.Network.Remotes["origin"].Dump();
+		Commands.Fetch(repo, remote.Name, remote.FetchRefSpecs.Select(e => e.Specification), new FetchOptions { TagFetchMode = TagFetchMode.Auto, CredentialsProvider = Credz }, "");
+		tagsFetchedSet.Add(folder);
+		return repo;
+	}
+	
+	private static Maybe<string> GetRepoUrl(string folder)
+	{
+		if (!IsRepo(folder)) return May.None<string>();
+		var repo = new Repository(folder);
+		if (repo.Network.Remotes.Count() == 0) return May.None<string>();
+		return May.Some(repo.Network.Remotes.First().Url);
+	}
+	
+	private static GitFileState GetFileState(string folder) => IsRepo(folder) switch
+	{
+		false => GitFileState.None,
+		true => new Repository(folder).RetrieveStatus(new StatusOptions()).All(e => e.State == FileStatus.Ignored) switch
+		{
+			true => GitFileState.Clean,
+			false => GitFileState.PendingChanges
+		}
+	};
+
+	private static GitSyncState GetSyncState(string folder)
+	{
+		GitSyncState GetValidTrackingStatus()
+		{
+			var details = new Repository(folder).Head.TrackingDetails;
+			return (details.AheadBy, details.BehindBy) switch
+			{
+				(not null and not 0, null or 0) => GitSyncState.Ahead,
+				(null or 0, not null and not 0) => GitSyncState.Behind,
+				(null or 0, null or 0) => GitSyncState.Clean,
+				_ => throw new ArgumentException()
+			};
+		}
+		
+		return IsRepo(folder) switch
+		{
+			false => GitSyncState.None,
+			true => GetValidTrackingStatus()
+		};
+	}
+	
+	private static bool GetIsHeadOnTag(string folder)
+	{
+		var repo = new Repository(folder);
+		var headCommitId = repo.Head.Tip.Id;
+		return repo.Tags.Any(e => e.Target.Id == headCommitId && TryGetVersionFromCanTagName(e.CanonicalName, out _));
+	}
+	
+	private static string[] GetTaggedVersions(string folder) =>
+		new Repository(folder).Tags
+			.Where(e => TryGetVersionFromCanTagName(e.CanonicalName, out _))
+			.Select(e => { TryGetVersionFromCanTagName(e.CanonicalName, out var version); return version!; })
+			.ToArray();
+
+	
+	
+	private static readonly CredentialsHandler Credz = (_url, _user, _cred) => new UsernamePasswordCredentials
+    {
+        Username = Cfg.GitHub.Username,
+        Password = Cfg.GitHub.Token,
+    };
+	
+	private static Signature MakeSignature() => new Signature(Cfg.Git.Name, Cfg.Git.Email, DateTime.Now);
+	
+	private static void Push(this Repository repo, string objectish)
+	{
+		var remote = repo.Network.Remotes["origin"];
+		repo.Network.Push(remote, objectish, new PushOptions { CredentialsProvider = Credz });
+	}
+
+	
+	private static bool IsRepo(string folder) => Repository.IsValid(folder);
+	
+	private static IgnoreSet GetIgnoreSet(string folder) =>
+		new(
+			new Repository(folder)
+				.RetrieveStatus(new StatusOptions
+				{
+				})
+				.Where(e => e.State == FileStatus.Ignored)
+				.Select(e => Path.Combine(folder, e.FilePath).Replace("/", @"\"))
+				.ToArray()
+		);
+	
+	private static bool TryGetVersionFromCanTagName(string canTagName, out string? version)
+	{
+		version = null;
+		var parts = canTagName.Split('/');
+		if (parts.Length != 3) return false;
+		if (parts[0] != "refs") return false;
+		if (parts[1] != "tags") return false;
+		var t = parts[2];
+		if (!t.StartsWith("v")) return false;
+		if (t.Contains(' ')) return false;
+		version = t[1..];
+		return true;
+	}
+}
+
+
+
+
 
 
 public class IgnoreSet
@@ -32,14 +203,14 @@ public class IgnoreSet
 		Folders.All(folder => !path.StartsWith(folder));
 }
 
-public enum GitStatus
+public enum GitFileState
 {
 	None,
 	PendingChanges,
 	Clean,
 }
 
-public enum GitTrackingStatus
+public enum GitSyncState
 {
 	None,
 	Ahead,
@@ -50,30 +221,30 @@ public enum GitTrackingStatus
 
 public static class GitEnumUtils
 {
-	public static string Fmt(this GitStatus e) => e switch
+	public static string Fmt(this GitFileState e) => e switch
 	{
-		GitStatus.None => "_",
-		GitStatus.PendingChanges => "pending changes",
-		GitStatus.Clean => "clean",
+		GitFileState.None => "_",
+		GitFileState.PendingChanges => "pending changes",
+		GitFileState.Clean => "clean",
 		_ => throw new ArgumentException()
 	};
 
-	public static string Fmt(this GitTrackingStatus e) => e switch
+	public static string Fmt(this GitSyncState e) => e switch
 	{
-		GitTrackingStatus.None => "_",
-		GitTrackingStatus.Ahead => "ahead",
-		GitTrackingStatus.Behind => "behind",
-		GitTrackingStatus.Clean => "in sync",
+		GitSyncState.None => "_",
+		GitSyncState.Ahead => "ahead",
+		GitSyncState.Behind => "behind",
+		GitSyncState.Clean => "in sync",
 		_ => throw new ArgumentException()
 	};
 	
-	public static bool IsNormEnabled(bool isNormEmpty, GitStatus gitStatus, GitTrackingStatus gitTrackingStatus) =>
+	public static bool IsNormEnabled(bool isNormEmpty, GitFileState gitStatus, GitSyncState gitTrackingStatus) =>
 		!isNormEmpty &&
-		gitStatus == GitStatus.Clean &&
-		gitTrackingStatus == GitTrackingStatus.Clean;
+		gitStatus == GitFileState.Clean &&
+		gitTrackingStatus == GitSyncState.Clean;
 
-	public static string FmtNorm(bool isNormEmpty, GitStatus gitStatus, GitTrackingStatus gitTrackingStatus) =>
-		(isNormEmpty, gitStatus == GitStatus.Clean, gitTrackingStatus == GitTrackingStatus.Clean) switch
+	public static string FmtNorm(bool isNormEmpty, GitFileState gitStatus, GitSyncState gitTrackingStatus) =>
+		(isNormEmpty, gitStatus == GitFileState.Clean, gitTrackingStatus == GitSyncState.Clean) switch
 		{
 			(true, _, _) => "already normalized",
 			(false, false, _) => "git repo not clean",
@@ -82,57 +253,3 @@ public static class GitEnumUtils
 		};
 }
 
-
-
-public static class ApiGit
-{
-	public static GitStatus GetStatus(string folder) => IsRepo(folder) switch
-	{
-		false => GitStatus.None,
-		true => new Repository(folder).RetrieveStatus(new StatusOptions()).All(e => e.State == FileStatus.Ignored) switch
-		{
-			true => GitStatus.Clean,
-			false => GitStatus.PendingChanges
-		}
-	};
-
-	public static GitTrackingStatus GetTrackingStatus(string folder)
-	{
-		GitTrackingStatus GetValidTrackingStatus()
-		{
-			var details = new Repository(folder).Head.TrackingDetails;
-			return (details.AheadBy, details.BehindBy) switch
-			{
-				(not null and not 0, null or 0) => GitTrackingStatus.Ahead,
-				(null or 0, not null and not 0) => GitTrackingStatus.Behind,
-				(null or 0, null or 0) => GitTrackingStatus.Clean,
-				_ => throw new ArgumentException()
-			};
-		}
-		
-		return IsRepo(folder) switch
-		{
-			false => GitTrackingStatus.None,
-			true => GetValidTrackingStatus()
-		};
-	}
-	
-	public static IgnoreSet GetIgnoreSetOpt(string folder) => IsRepo(folder) switch
-	{
-		true => GetIgnoreSet(folder),
-		false => IgnoreSet.Empty,
-	};
-	
-	private static bool IsRepo(string folder) => Repository.IsValid(folder);
-	
-	private static IgnoreSet GetIgnoreSet(string folder) =>
-		new(
-			new Repository(folder)
-				.RetrieveStatus(new StatusOptions
-				{
-				})
-				.Where(e => e.State == FileStatus.Ignored)
-				.Select(e => Path.Combine(folder, e.FilePath).Replace("/", @"\"))
-				.ToArray()
-		);			
-}

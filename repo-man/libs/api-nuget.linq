@@ -6,11 +6,14 @@
   <Namespace>CliWrap.Buffered</Namespace>
   <Namespace>LINQPadExtras</Namespace>
   <Namespace>NuGet.Common</Namespace>
+  <Namespace>NuGet.Configuration</Namespace>
   <Namespace>NuGet.Packaging.Core</Namespace>
   <Namespace>NuGet.Protocol</Namespace>
   <Namespace>NuGet.Protocol.Core.Types</Namespace>
   <Namespace>NuGet.Versioning</Namespace>
   <Namespace>System.Threading.Tasks</Namespace>
+  <Namespace>LINQPadExtras.Scripting_LockChecker</Namespace>
+  <Namespace>LINQPadExtras.Scripting_Batcher</Namespace>
 </Query>
 
 #load "..\cfg"
@@ -18,19 +21,241 @@
 
 void Main()
 {
-	//var p = "PowBasics";
-	//var prj = new PrjNfo(@"C:\Dev_Nuget\Libs\PowBasics\Libs\PowBasics\PowBasics.csproj");
-	//ApiNuget.GetLastRemoteVer(prj).Dump();
-	//ApiNuget.DoesPkgExist(p).Dump();
-	//ApiNuget.GetRemoteVers(p).Dump();
 	
-	//ApiNuget.ReleaseLocally(new PrjNfo(@"C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\LINQPadExtras.csproj"), "0.0.3");
-	//ApiNuget.GetRemoteVers("LINQPadExtras");
 }
 
 
+public enum NugetSource
+{
+	Local,
+	Remote
+}
+
 public static class ApiNuget
 {
+	public static string[] GetVers(NugetSource src, string pkgId) => NugetLogic.Get(src).GetVers(pkgId);
+	public static DateTime? GetVerTimestamp(NugetSource src, string pkgId, string pkgVer) => NugetLogic.Get(src).GetVerTimestamp(pkgId, pkgVer);
+	public static IPackageSearchMetadata[] Search(NugetSource src, string str) => NugetLogic.Get(src).Search(str);
+	
+	public static void Release(NugetSource src, PrjNfo prj, string pkgVer, bool skipBuild, bool dryRun)
+	{
+		if (!CheckLocks(prj, pkgVer, dryRun)) return;
+		
+		Batcher.Run(
+			dryRun,
+			$"Releasing {prj.Name} to {src}",
+			cmd =>
+			{
+				Release(cmd, src, prj, pkgVer, skipBuild, dryRun);
+			}
+		);
+	}
+	
+	public static void Release(ICmd cmd, NugetSource src, PrjNfo prj, string pkgVer, bool skipBuild, bool dryRun)
+	{
+		var isRemote = src == NugetSource.Remote;
+		
+		var packedPrj = cmd.Pack(prj.Sln.Folder, prj, pkgVer, skipBuild, dryRun);
+		cmd.ReleaseToFolder(packedPrj, Cfg.Nuget.LocalPackageFolder, false);
+		cmd.ReleaseToFolder(packedPrj, Cfg.Nuget.GlobalPackageFolder, true);
+
+		if (isRemote)
+		{
+			cmd.Run("nuget",
+				"push",
+				packedPrj.PkgFile,
+				"-source",
+				Cfg.Nuget.RemoteRepoUrl,
+				"-apikey",
+				Cfg.Nuget.ApiKey
+			);
+			cmd.AddArtifact(prj.NugetUrl);
+		}
+
+		cmd.DeleteFile(packedPrj.PkgFile);
+	}
+
+
+	private record PackedPrj(PrjNfo Prj, string PkgFile)
+	{
+		private string BaseFile => Path.GetFileNameWithoutExtension(PkgFile);
+		public string PkgFolder => Path.GetDirectoryName(PkgFile)!;
+		public string Version => BaseFile.Extract(@"(?<=\.)\d+\.\d+\.\d+.*");
+		public string ProjName => BaseFile.Extract(@".*(?=\.\d\.\d\.\d)");
+		public string ProjNameLower => ProjName.ToLowerInvariant();
+	}
+
+
+	private static PackedPrj Pack(this ICmd cmd, string slnFolder, PrjNfo prj, string ver, bool skipBuild, bool dryRun)
+	{
+		//	Alternatives:
+		//	
+		//	nuget pack -version 0.0.2
+		//	dotnet pack /p:version=0.0.2
+		//	dotnet pack -p:packageversion=0.0.2
+		//	dotnet pack -property:version=0.0.2
+		//	dotnet pack -p:version=0.0.2				(the one we use)
+		//	
+		//	note:
+		//		- dotnet puts the .pkg file in [Project]\bin\Debug
+		//		- nuget  puts the .pkg file in [Project]\
+		cmd.Cd(prj.Folder);
+
+		cmd.Run("dotnet",
+			new[]
+			{
+				"pack",
+				$"-p:version={ver}",
+				$"-p:SolutionDir=\"{slnFolder}\""
+			}.AddIf(skipBuild, "--no-build")
+		);
+		var pkgFile = Path.Combine(prj.Folder, "bin", "Debug", $"{prj.Name}.{ver}.nupkg");
+		if (!dryRun && !File.Exists(pkgFile)) throw new ArgumentException($"Did not find the packed file @ '{pkgFile}'");
+		return new PackedPrj(prj, pkgFile);
+	}
+	
+	private static string[] AddIf(this string[] arr, bool condition, string extra) => condition switch
+	{
+		false => arr,
+		true => arr.Concat(new[] { extra }).ToArray()
+	};
+
+
+	private static void ReleaseToFolder(this ICmd cmd, PackedPrj packedPrj, string packageFolder, bool expand)
+	{
+		var folder = MkReleaseFolder(packedPrj.Prj, packedPrj.Version, packageFolder);
+		cmd.DeleteFolder(folder);
+
+		var args = new List<string>
+		{
+				"add",
+				packedPrj.PkgFile,
+				"-source",
+				packageFolder
+		};
+		if (expand)
+			args.Add("-expand");
+		cmd.Run("nuget", args.ToArray());
+		cmd.AddArtifact(folder);
+	}
+
+
+
+
+	private static string MkReleaseFolder(PrjNfo prj, string version, string packageFolder) => Path.Combine(packageFolder, prj.NameLower, version);
+
+	private static bool CheckLocks(PrjNfo prj, string ver, bool dryRun)
+	{
+		if (dryRun) return true;
+		return LockChecker.CheckFolders(
+			MkReleaseFolder(prj, ver, Cfg.Nuget.LocalPackageFolder),
+			MkReleaseFolder(prj, ver, Cfg.Nuget.GlobalPackageFolder)
+		);
+	}
+
+	private static string Extract(this string str, string regexStr)
+	{
+		var regex = new Regex(regexStr);
+		if (!regex.IsMatch(str)) throw new ArgumentException($"Failed to extract regex:'{regexStr}' from string:'{str}'");
+		var match = regex.Match(str);
+		return match.Captures[0].Value;
+	}
+}
+
+internal static class NugetLogic
+{
+	public static Nuget Get(NugetSource src) => nugetMap[src].Value;
+	
+	private static readonly Dictionary<NugetSource, Lazy<Nuget>> nugetMap = new()
+	{
+		{ NugetSource.Local, new Lazy<Nuget>(() => new Nuget(Cfg.Nuget.LocalPackageFolder)) },
+		{ NugetSource.Remote, new Lazy<Nuget>(() => new Nuget(Cfg.Nuget.RemoteRepoUrl)) },
+	};
+	
+	internal class Nuget
+	{
+		private readonly ILogger logger = NullLogger.Instance;
+		private readonly IEnumerable<Lazy<INuGetResourceProvider>> providers;
+		private readonly PackageSource pkgSource;
+		private readonly SourceRepository repo;
+		private readonly SourceCacheContext cache = new();
+		private readonly FindPackageByIdResource findLogic;
+		private readonly PackageMetadataResource metadataLogic;
+		private readonly PackageSearchResource searchLogic;
+
+		public Nuget(string pkgSourceLocation)
+		{
+			providers = Repository.Provider.GetCoreV3();
+			pkgSource = new PackageSource(pkgSourceLocation);
+			repo = new SourceRepository(pkgSource, providers);
+			findLogic = repo.GetResource<FindPackageByIdResource>();
+			metadataLogic = repo.GetResource<PackageMetadataResource>();
+			searchLogic = repo.GetResource<PackageSearchResource>();
+		}
+
+		public string[] GetVers(string pkgId) =>
+			findLogic.GetAllVersionsAsync(pkgId, cache, logger, CancellationToken.None).Result
+				.Where(e => !e.IsPrerelease)
+				.OrderByDescending(e => e)
+				.Select(e => $"{e}")
+				.ToArray();
+
+		public DateTime? GetVerTimestamp(string pkgId, string pkgVer)
+		{
+			var pkg = new PackageIdentity(pkgId, NuGetVersion.Parse(pkgVer));
+			var meta = metadataLogic.GetMetadataAsync(pkg, cache, logger, CancellationToken.None).Result;
+			return meta?.Published?.DateTime;
+		}
+		
+		public IPackageSearchMetadata[] Search(string str) => searchLogic.SearchAsync(
+			str,
+			new SearchFilter(
+				includePrerelease: true,
+				filter: null
+			)
+			{
+				IncludeDelisted = true,
+			},
+			0, 100,
+			logger,
+			CancellationToken.None
+		).Result.ToArray();
+	}
+
+
+
+	//public class Logger : ILogger
+	//{
+	//	private void L(LogLevel level, string s, string? extra = null) => $"[{level}{FmtExtra(extra)}] {s}".Dump();
+	//	private string FmtExtra(string? extra) => extra switch
+	//	{
+	//		null => string.Empty,
+	//		not null => $"-{extra}"
+	//	};
+	//
+	//	public void LogDebug(string data) => L(LogLevel.Debug, data);
+	//	public void LogVerbose(string data) => L(LogLevel.Verbose, data);
+	//	public void LogInformation(string data) => L(LogLevel.Information, data);
+	//	public void LogMinimal(string data) => L(LogLevel.Minimal, data);
+	//	public void LogWarning(string data) => L(LogLevel.Warning, data);
+	//	public void LogError(string data) => L(LogLevel.Error, data);
+	//	public void LogInformationSummary(string data) => L(LogLevel.Information, data, "summary");
+	//
+	//	public void Log(LogLevel level, string data) => L(level, data, "l0");
+	//	public async Task LogAsync(LogLevel level, string data) => L(level, data, "l1");
+	//	public void Log(ILogMessage msg) => L(msg.Level, msg.Message, "l2");
+	//	public async Task LogAsync(ILogMessage msg) => L(msg.Level, msg.Message, "l3");
+	//}
+}
+
+
+
+
+/*
+public static class ApiNuget
+{
+	public static string? GetLatestVer(string name) => GetVers(name).FirstOrDefault();
+	
 	public static string[] GetRemoteVers(string name)
 	{
 		//GetVers(name);
@@ -116,11 +341,7 @@ public static class ApiNuget
 			.FirstOrDefault();
 	}
 
-	public static string? GetLastRemoteVer(PrjNfo prj)
-	{
-		var vers = GetVers(prj.Name);
-		return vers.OrderByDescending(e => NuGetVersion.Parse(e)).FirstOrDefault();
-	}
+	public static string? GetLastRemoteVer(PrjNfo prj) => GetVers(prj.Name).FirstOrDefault();
 
 
 
@@ -216,24 +437,17 @@ public static class ApiNuget
 
 	private static PackedPrj Pack(string slnFolder, PrjNfo prj, string ver, bool dryRun)
 	{
-		/*
-			Alternatives:
-			
-			nuget pack -version 0.0.2
-			dotnet pack /p:version=0.0.2
-			dotnet pack -p:packageversion=0.0.2
-			dotnet pack -property:version=0.0.2
-			dotnet pack -p:version=0.0.2				(the one we use)
-			
-			note:
-				- dotnet puts the .pkg file in [Project]\bin\Debug
-				- nuget  puts the .pkg file in [Project]\
-		*/
-		/*var cmdOut = Con.RunIn("dotnet", prj.Folder,
-			"pack",
-			$"-p:version={ver}"
-		);
-		var pkgFile = cmdOut.Extract("(?<=Successfully created package ').*(?=')");*/
+		//	Alternatives:
+		//	
+		//	nuget pack -version 0.0.2
+		//	dotnet pack /p:version=0.0.2
+		//	dotnet pack -p:packageversion=0.0.2
+		//	dotnet pack -property:version=0.0.2
+		//	dotnet pack -p:version=0.0.2				(the one we use)
+		//	
+		//	note:
+		//		- dotnet puts the .pkg file in [Project]\bin\Debug
+		//		- nuget  puts the .pkg file in [Project]\
 		Con.RunIn("dotnet", prj.Folder,
 			"pack",
 			$"-p:version={ver}",
@@ -249,16 +463,18 @@ public static class ApiNuget
 	{
 		if (!verMap.TryGetValue(name, out var list))
 			list = verMap[name] = Nuget.Finder.GetAllVersionsAsync(name, Nuget.Cache, Nuget.Logger, CancellationToken.None).Result.Select(e => $"{e}").ToList();
-		return list.ToArray();
+		return list
+			.OrderByDescending(e => NuGetVersion.Parse(e))
+			.ToArray();
 	}
 
 
-	/*private class MyLogger : LoggerBase
-	{
-		public override void Log(ILogMessage msg) => L($"{msg.Level} {msg.Time} {msg.Message}");
-		public override Task LogAsync(ILogMessage msg) => throw new NotImplementedException();
-		private static void L(string s) => s.Dump();
-	}*/
+	//private class MyLogger : LoggerBase
+	//{
+	//	public override void Log(ILogMessage msg) => L($"{msg.Level} {msg.Time} {msg.Message}");
+	//	public override Task LogAsync(ILogMessage msg) => throw new NotImplementedException();
+	//	private static void L(string s) => s.Dump();
+	//}
 
 	private static string Extract(this string str, string regexStr)
 	{
@@ -268,3 +484,4 @@ public static class ApiNuget
 		return match.Captures[0].Value;
 	}
 }
+*/

@@ -11,7 +11,6 @@ public record SlnNfo(string Folder)
 	public string Name => Path.GetFileNameWithoutExtension(Folder);
 	public string ReadmeFile => Path.Combine(Folder, "README.md");
 	public string DirectoryBuildPropsFile => Path.Combine(Folder, "Directory.Build.props");
-	public string GitHubUrl => $"https://github.com/vlad2048/{Name}.git";
 }
 
 

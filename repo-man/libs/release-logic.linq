@@ -40,7 +40,7 @@ void Main()
 		$"Cannot release: {releaseNfo.ErrorMessage}".Dump();
 		return;
 	}
-	ReleaseLogic.ReleaseSln(sln, releaseNfo.ReleaseVersion!, dryRun);
+	//ReleaseLogic.ReleaseSln(sln, releaseNfo.ReleaseVersion!, dryRun);
 }
 
 
@@ -60,22 +60,29 @@ public static class ReleaseLogic
 {
 	public static void ReleaseSln(SlnDetails sln, string releaseVersion, bool dryRun)
 	{
-		Batcher.Run(dryRun, $"Releasing {releaseVersion}", cmd =>
-		{
-			cmd.Cd(sln.Folder);
-			cmd.Run("dotnet", "build");
-		
-			var version = Xml.Get(sln.Nfo.DirectoryBuildPropsFile, XmlPaths.Version);
-			if (version != releaseVersion && !dryRun)
+		Batcher.Run(
+			$"Releasing {releaseVersion}",
+			cmd =>
 			{
-				Xml.Set(sln.Nfo.DirectoryBuildPropsFile, XmlPaths.Version, releaseVersion);
-				ApiGit.AddAndPush(sln.Folder, ApiGit.GetVersionTagName(releaseVersion));
+				cmd.Cd(sln.Folder);
+				cmd.Run("dotnet", "build");
+			
+				var version = Xml.Get(sln.Nfo.DirectoryBuildPropsFile, XmlPaths.Version);
+				if (version != releaseVersion && !dryRun)
+				{
+					Xml.Set(sln.Nfo.DirectoryBuildPropsFile, XmlPaths.Version, releaseVersion);
+					ApiGit.AddAndPush(sln.Folder, ApiGit.GetVersionTagName(releaseVersion));
+				}
+				if (!dryRun)
+					ApiGit.CreateVersionTag(sln.Folder, releaseVersion);
+				foreach (var prj in sln.Prjs)
+					ApiNuget.Release(cmd, NugetSource.Remote, prj.Nfo, releaseVersion, true, dryRun);
+			},
+			opt =>
+			{
+				opt.DryRun = dryRun;
 			}
-			if (!dryRun)
-				ApiGit.CreateVersionTag(sln.Folder, releaseVersion);
-			foreach (var prj in sln.Prjs)
-				ApiNuget.Release(cmd, NugetSource.Remote, prj.Nfo, releaseVersion, true, dryRun);
-		});
+		);
 	}
 	
 	

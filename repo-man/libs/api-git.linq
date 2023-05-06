@@ -12,7 +12,12 @@ void Main()
 {
 	//ApiGit.RetrieveGitState(@"C:\tmp\GitTest").Dump();
 	
-	ApiGit.AddAndPush(@"C:\Dev_Nuget\Libs\LINQPadExtras", "0.0.6");
+	//ApiGit.AddAndPush(@"C:\Dev_Nuget\Libs\LINQPadExtras", "0.0.6");
+	
+	
+	//var folder = @"C:\Dev_Nuget\Libs\PowRxVar";
+	//var repo = new Repository(folder);
+	//repo.Push(repo.Head.CanonicalName);
 }
 
 
@@ -148,10 +153,17 @@ public static class ApiGit
 	
 	private static Signature MakeSignature() => new Signature(Cfg.Git.Name, Cfg.Git.Email, DateTime.Now);
 	
-	private static void Push(this Repository repo, string objectish)
+	public static void Push(this Repository repo, string objectish)
 	{
 		var remote = repo.Network.Remotes["origin"];
-		repo.Network.Push(remote, objectish, new PushOptions { CredentialsProvider = Credz });
+		try
+		{
+			repo.Network.Push(remote, objectish, new PushOptions { CredentialsProvider = Credz });
+		}
+		catch (LibGit2SharpException ex) when (ex.Message.Contains("authentication", StringComparison.InvariantCultureIgnoreCase))
+		{
+			throw new ApplicationException("Your repo-man github 'Personal access token' seems to have expired (check in Developer settings). It needs the repo(all) and delete_repo perms", ex);
+		}
 	}
 
 	

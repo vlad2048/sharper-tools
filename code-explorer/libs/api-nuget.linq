@@ -204,10 +204,9 @@ class Logger : ILogger
 
 static class StrExt
 {
-	public static string FmtSize(this long e)
-	{
-		if (e < 1024) return $"{e} Bytes";
-		if (e < 1024 * 1024) return $"{e / 1024.0:F1} KB";
-		return $"{e / (1024.0 * 1024):F1} MB";		
-	}
+	public static string FmtSize(this long e) => $"{e / 1024} kb".PadLeft(8);
+		
+		//if (e < 1024) return $"{e} Bytes";
+		//if (e < 1024 * 1024) return $"{e / 1024.0:F1} KB";
+		//return $"{e / (1024.0 * 1024):F1} MB";		
 }

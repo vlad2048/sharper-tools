@@ -2,16 +2,18 @@
   <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
   <NuGetReference>Microsoft.Build</NuGetReference>
   <NuGetReference>PowMaybeErr</NuGetReference>
+  <NuGetReference>PowTrees.LINQPad</NuGetReference>
   <Namespace>LINQPadExtras</Namespace>
   <Namespace>LINQPadExtras.Utils</Namespace>
   <Namespace>Microsoft.Build.Construction</Namespace>
   <Namespace>PowBasics.CollectionsExt</Namespace>
   <Namespace>PowMaybe</Namespace>
+  <Namespace>PowMaybeErr</Namespace>
   <Namespace>PowRxVar</Namespace>
   <Namespace>System.Reactive</Namespace>
   <Namespace>System.Reactive.Linq</Namespace>
   <Namespace>System.Reactive.Subjects</Namespace>
-  <Namespace>PowMaybeErr</Namespace>
+  <Namespace>PowTrees.LINQPad</Namespace>
 </Query>
 
 #load "..\cfg"
@@ -25,12 +27,14 @@
 
 void Main()
 {
-	//ApiNuget.GetVers(NugetSource.Local, "powrxvar.maybe").Dump();
+	Util.HtmlHead.AddStyles(@"body { font-family: consolas }");
+	var allSlns = Cfg.Solutions.SelectToArray(e => SlnDetails.Retrieve(new SlnNfo(e)).Ensure());
+	var trees = PkgRefUpdater.MakeRefTree(allSlns);
+	var slnBasics = SlnDetails.Retrieve(new SlnNfo(@"C:\Dev_Nuget\Libs\PowBasics")).Ensure();
+	var slnTrees = SlnDetails.Retrieve(new SlnNfo(@"C:\Dev_Nuget\Libs\PowTrees")).Ensure();
 	
-	var sln = SlnDetails.Retrieve(new SlnNfo(@"C:\Dev\sharper-tools"));
-	sln.Dump();
-	
-	//PkgRefUpdater.UpdatePkgRefInSln(sln, "PowRxVar", "0.0.11");
+	foreach (var tree in trees)
+		GenericTreePrinter.Print(tree).Dump();
 }
 
 
@@ -104,7 +108,9 @@ public record SlnDetails(
 		if (slnFile == null) return MayErr.None<SlnDetails>("no .sln file found");
 		if (!File.Exists(nfo.DirectoryBuildPropsFile)) return MayErr.None<SlnDetails>("Directory.Build.props file not found");
 		
-		var allPrjs = Files.FindRecursively(nfo.Folder, "*.csproj").SelectToArray(e => new PrjNfo(e, nfo));
+		var allPrjs = Files.FindRecursively(nfo.Folder, "*.csproj")
+			.Where(e => !e.Contains("_infos"))
+			.SelectToArray(e => new PrjNfo(e, nfo));
 		var prjs = allPrjs.Where(IsPackable).SelectToArray(e => new Prj(e, nfo));
 		var prjsIgnored = allPrjs.WhereNotToArray(IsPackable);
 		var pkgRefs = (
@@ -189,18 +195,47 @@ static class PkgRefReader
 	}
 }
 
+public record SlnDetailsNeedUpdate(SlnDetails Sln, bool NeedUpdate);
+
+public record SlnNode(SlnDetails Sln)
+{
+	public override string ToString() => $"{Sln.Nfo.Name} / {NeedsUpdate}";
+	public bool NeedsUpdate { get; internal set; }
+}
+
 public static class PkgRefUpdater
 {
-	public static bool DoesPkgNeedUpdating(SlnDetails sln, SlnDetails[] others) =>
+	public static TNod<SlnNode>[] MakeRefTree(SlnDetails[] allSlns)
+	{
+		var roots = allSlns.SelectToList(sln => Nod.Make(new SlnNode(sln)));
+		var map = roots.ToDictionary(e => e.V.Sln, e => e);
+		foreach (var sln in allSlns)
+		{
+			var nod = map[sln];
+			var deps = GetDependentSlns(sln, allSlns);
+			foreach (var dep in deps)
+			{
+				var depNod = map[dep.Sln];
+				roots.Remove(depNod);
+				nod.AddChild(depNod);
+			}
+		}
+		return roots.ToArray();
+	}
+	
+	public static SlnDetailsNeedUpdate[] GetDependentSlns(SlnDetails sln, SlnDetails[] allSlns) =>
 	(
 		from prj in sln.Prjs
-		from other in others
+		from other in allSlns
 		where other != sln
 		from pkgRef in other.PkgRefs
 		where pkgRef.Name == prj.Nfo.Name
-		where pkgRef.Version != sln.Version
-		select true
-	).Any();
+		select new SlnDetailsNeedUpdate(other, pkgRef.Version != sln.Version)
+	)
+		.Distinct()
+		.ToArray();
+		
+	public static bool DoesPkgNeedUpdating(SlnDetails sln, SlnDetails[] allSlns) => GetDependentSlns(sln, allSlns).Any(e => e.NeedUpdate);
 	
 	private record UpdateNfo(SlnDetails Sln, string PkgName, string PkgVer);
 	
@@ -231,7 +266,7 @@ public static class PkgRefUpdater
 
 	private static void UpdatePkgRefInPrj(string prjFile, string pkgName, string pkgVer)
 	{
-		prjFile.Dump();
+		//prjFile.Dump();
 		var root = ProjectRootElement.Open(prjFile)!;
 		var itemGrps = root.ItemGroups.ToArray();
 		var pkgRefs = (

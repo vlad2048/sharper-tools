@@ -7,7 +7,9 @@
 </Query>
 
 #load ".\_libs\base"
+#load ".\_libs\templater"
 #load ".\templates\HtmlWatch"
+#load ".\templates\ViteCore"
 
 
 async Task<int> Main(string[] args)

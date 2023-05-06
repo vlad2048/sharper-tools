@@ -18,7 +18,7 @@
 void Main()
 {
 	Css.Init();
-	V.Init(true);
+	//V.Init(true);
 	var d = new Disp();
 	
 	CodeExplorer();

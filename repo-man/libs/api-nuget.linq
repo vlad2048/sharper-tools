@@ -21,7 +21,10 @@
 
 void Main()
 {
-	
+	Util.HorizontalRun(true,
+		ApiNuget.GetVers(NugetSource.Local, "PowRxVar"),
+		ApiNuget.GetVers(NugetSource.Remote, "PowRxVar")
+	).Dump();
 }
 
 
@@ -42,11 +45,14 @@ public static class ApiNuget
 		if (!CheckLocks(prj, pkgVer, dryRun)) return;
 		
 		Batcher.Run(
-			dryRun,
 			$"Releasing {prj.Name} to {src}",
 			cmd =>
 			{
 				Release(cmd, src, prj, pkgVer, skipBuild, dryRun);
+			},
+			opt =>
+			{
+				opt.DryRun = dryRun;
 			}
 		);
 	}

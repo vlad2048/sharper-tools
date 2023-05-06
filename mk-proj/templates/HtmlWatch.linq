@@ -20,8 +20,30 @@ void Main()
 	);
 	FileUtils.DeleteFolder(projNfo.ProjFolder);
 	
-	HtmlWatchCommand.Run(projNfo);
+	HtmlWatchCommand.Run(projNfo, false);
 }
+
+
+public record ProjNfo(string RootFolder, string Name)
+{
+	public string ProjFolder => Path.Combine(RootFolder, Name);
+	public string PackageFile => Mk("package.json");
+	public string RunFile => Mk("run.bat");
+	public string Mk(string name) => Path.Combine(ProjFolder, name);
+}
+
+static class ProjUtils
+{
+	public static ProjNfo Init(string name)
+	{
+		var nfo = new ProjNfo(Directory.GetCurrentDirectory(), name);
+		if (Directory.Exists(nfo.ProjFolder))
+			throw new ArgumentException($"Folder {nfo.ProjFolder} already exists");
+		return nfo;
+	}
+}
+
+
 
 [Command("HtmlWatch")]
 public class HtmlWatchCommand : ICommand

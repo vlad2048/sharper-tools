@@ -17,24 +17,6 @@ void Main()
 	}, fileOut);
 }
 
-public record ProjNfo(string RootFolder, string Name)
-{
-	public string ProjFolder => Path.Combine(RootFolder, Name);
-	public string PackageFile => Mk("package.json");
-	public string RunFile => Mk("run.bat");
-	public string Mk(string name) => Path.Combine(ProjFolder, name);
-}
-
-public static class ProjUtils
-{
-	public static ProjNfo Init(string name)
-	{
-		var nfo = new ProjNfo(Directory.GetCurrentDirectory(), name);
-		if (Directory.Exists(nfo.ProjFolder))
-			throw new ArgumentException($"Folder {nfo.ProjFolder} already exists");
-		return nfo;
-	}
-}
 
 public static class TemplateUtils
 {
@@ -129,6 +111,13 @@ public static class FileUtils
 		var dirs = Directory.GetDirectories(folder);
 		foreach (var file in files) File.Delete(file);
 		foreach (var dir in dirs) Directory.Delete(dir, true);
+	}
+	
+	public static string CreateFolderIFN(this string folder)
+	{
+		if (!Directory.Exists(folder))
+			Directory.CreateDirectory(folder);
+		return folder;
 	}
 }
 

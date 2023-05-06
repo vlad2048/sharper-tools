@@ -13,9 +13,11 @@ void Main()
 {
 	var sln = new SlnNfo(@"C:\tmp\GitTest");
 	void Check() => $"Repo exists: {ApiGithub.DoesRepoExist(sln.Name)}".Dump();
+	Check();
+	return;
 	
 	var gitFolder = Path.Combine(sln.Folder, ".git");
-	if (ApiGithub.DoesRepoExist(sln.Name)) ApiGithub.DeleteRepo(sln.Name);
+	if (ApiGithub.DoesRepoExist(sln.Name)) ApiGithub.DeleteRepoAndGitFolder(sln.Name, sln.Folder);
 	//if (Directory.Exists(gitFolder)) Directory.Delete(gitFolder, true);
 	return;
 		
@@ -36,7 +38,6 @@ public static class ApiGithub
 		var gitUrl = $"https://github.com/vlad2048/{sln.Name}.git";
 
 		Batcher.Run(
-			false,
 			$"Creating {sln.Name} GitHub repo",
 			cmd =>
 			{

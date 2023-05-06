@@ -24,8 +24,35 @@
   <Namespace>Windows.UI.Core</Namespace>
   <Namespace>LINQPadExtras.Utils</Namespace>
   <Namespace>PowMaybeErr</Namespace>
+  <Namespace>System.Net</Namespace>
   <CopyLocal>true</CopyLocal>
 </Query>
+
+/*
+
+Manual
+======
+
+cd C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar
+dotnet pack -p:version=0.0.12 -p:SolutionDir="C:\Dev_Nuget\Libs\PowRxVar"
+nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar\bin\Debug\PowRxVar.0.0.12.nupkg" -source "C:\Dev_Nuget\packages"
+nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar\bin\Debug\PowRxVar.0.0.12.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
+
+cd C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar.Maybe
+dotnet pack -p:version=0.0.12 -p:SolutionDir="C:\Dev_Nuget\Libs\PowRxVar"
+nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar.Maybe\bin\Debug\PowRxVar.Maybe.0.0.12.nupkg" -source "C:\Dev_Nuget\packages"
+nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar.Maybe\bin\Debug\PowRxVar.Maybe.0.0.12.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
+
+cd C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras
+dotnet pack -p:version=0.0.13 -p:SolutionDir="C:\Dev_Nuget\Libs\LINQPadExtras"
+nuget add "C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\LINQPadExtras.0.0.13.nupkg" -source "C:\Dev_Nuget\packages"
+nuget add "C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\LINQPadExtras.0.0.13.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
+
+*/
+
+
+
+
 
 #load ".\cfg"
 #load ".\libs-lowlevel\xml"
@@ -207,6 +234,7 @@ object UI_Sln_Version(SlnDetails sln)
 object UI_Sln_Details(Maybe<GitState> mayGitState, SlnDetails sln, IRoVar<bool> showDependencies, Func<SlnDetails[]> allSlnsFun, Action refresh, IRoVar<bool> dryRun)
 {
 	var releaseNfo = ReleaseLogic.CanRelease(mayGitState, sln);
+	var dependentSlns = PkgRefUpdater.GetDependentSlns(sln, allSlnsFun());
 	return UtilExtra.MergeOpt(
 		new
 		{
@@ -244,7 +272,13 @@ object UI_Sln_Details(Maybe<GitState> mayGitState, SlnDetails sln, IRoVar<bool> 
 						true => (object)UI.MkGreenLabel("normalized"),
 						false => GitEnumUtils.IsNormEnabled(sln.Norm.IsEmpty, git.FileState, git.SyncState) switch
 						{
-							true => (Control)new Button("Normalize", _ => sln.Norm.Apply()),
+							true => (Control)new Button("Normalize", _ =>
+							{
+								var wasClean = git.FileState == GitFileState.Clean;
+								sln.Norm.Apply();
+								if (wasClean)
+									ApiGit.AddAndPush(sln.Folder, "normalize");
+							}),
 							false => UI.MkRedLabel(GitEnumUtils.FmtNorm(sln.Norm.IsEmpty, git.FileState, git.SyncState)),
 						}
 					},
@@ -263,11 +297,14 @@ object UI_Sln_Details(Maybe<GitState> mayGitState, SlnDetails sln, IRoVar<bool> 
 				true => (Control)new Button($"Release {releaseNfo.ReleaseVersion}", _ => { ReleaseLogic.ReleaseSln(sln, releaseNfo.ReleaseVersion, dryRun.V); refresh(); }),
 				false => UI.MkFlagLabel(releaseNfo.ErrorMessage!, releaseNfo.ErrorMessage == "no changes"),
 			},
-			UpdateOthers = PkgRefUpdater.DoesPkgNeedUpdating(sln, allSlnsFun()) switch
-			{
-				false => (Control)UI.MkGreenLabel("others are up to date"),
-				true => new Button("Update others", _ => PkgRefUpdater.UpdateOthers(sln, allSlnsFun()))
-			}
+			Dependents = Util.HorizontalRun(true,
+				PkgRefUpdater.DoesPkgNeedUpdating(sln, allSlnsFun()) switch
+				{
+					false => (Control)UI.MkGreenLabel("up to date"),
+					true => new Button("Update", _ => PkgRefUpdater.UpdateOthers(sln, allSlnsFun()))
+				},
+				UI.MkSlnsUpdatesLabel(dependentSlns)
+			)
 		}
 	);
 }
@@ -420,6 +457,28 @@ internal static class UI
 		not null => time.Value.FmtTime(),
 		null => "_",
 	};
+	
+	public static Control MkSlnsUpdatesLabel(SlnDetailsNeedUpdate[] slns) =>
+		new Span(
+			slns.SelectToArray(sln =>
+				new Label(sln.Sln.Nfo.Name)
+					.SetForeColor(sln.NeedUpdate ? RedCol : GreenCol)
+					.MakeMono()
+					.MargLeft()
+			)
+		);
+	
+	private static Control MakeMono(this Control ctrl)
+	{
+		ctrl.Styles["font-family"] = "consolas";
+		return ctrl;
+	}
+	
+	private static Control MargLeft(this Control ctrl)
+	{
+		ctrl.Styles["margin-left"] = "10px";
+		return ctrl;
+	}
 }
 
 

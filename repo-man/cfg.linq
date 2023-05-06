@@ -3,17 +3,21 @@
 public static class Cfg
 {
 	public static readonly string[] Solutions = {
-		//@"C:\tmp\GitTest",
 		@"C:\Dev_Nuget\Libs\PowBasics",
 		@"C:\Dev_Nuget\Libs\PowMaybe",
-		@"C:\Dev_Nuget\Libs\PowRxVar",
-		@"C:\Dev_Nuget\Libs\LINQPadExtras",
 		@"C:\Dev_Nuget\Libs\PowTrees",
+		@"C:\Dev_Nuget\Libs\PowRxVar",
 		@"C:\Dev_Nuget\Libs\PowWeb",
+		@"C:\Dev_Nuget\Libs\DynaServe",
+		@"C:\Dev_Nuget\Libs\LINQPadExtras",
+		
+		/*@"C:\tmp\GitTest",
+		@"C:\Dev\WebExtractor",
+		@"C:\Dev\Creepy",
 		@"C:\Dev_Nuget\Libs\ParserLib",
 		@"C:\Dev_Nuget\Libs\ImdbLib",
 		@"C:\Dev_Nuget\Libs\WinFormsCtrlLibs",
-		@"C:\Dev\sharper-tools",
+		@"C:\Dev\sharper-tools",*/
 	};
 	
 	public static class Git

@@ -1,5 +1,5 @@
 <Query Kind="Program">
-  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
+  <NuGetReference>LINQPadExtras</NuGetReference>
   <NuGetReference>Microsoft.Build</NuGetReference>
   <NuGetReference>PowMaybeErr</NuGetReference>
   <NuGetReference>PowTrees.LINQPad</NuGetReference>
@@ -10,10 +10,10 @@
   <Namespace>PowMaybe</Namespace>
   <Namespace>PowMaybeErr</Namespace>
   <Namespace>PowRxVar</Namespace>
+  <Namespace>PowTrees.LINQPad</Namespace>
   <Namespace>System.Reactive</Namespace>
   <Namespace>System.Reactive.Linq</Namespace>
   <Namespace>System.Reactive.Subjects</Namespace>
-  <Namespace>PowTrees.LINQPad</Namespace>
 </Query>
 
 #load "..\cfg"
@@ -289,7 +289,7 @@ public static class PkgRefUpdater
 		root.Save();
 
 		var str = Xml.ModSaveToString(prjFile, mod => {
-			mod.SetFlag(XmlFlag.GenerateDocumentationFile, false);
+			//mod.SetFlag(XmlFlag.GenerateDocumentationFile, mod.GetFlag(XmlFlag.IsPackable));
 		});
 		File.WriteAllText(prjFile, str);
 	}

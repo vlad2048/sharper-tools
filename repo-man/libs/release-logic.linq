@@ -1,8 +1,8 @@
 <Query Kind="Program">
   <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
-  <Namespace>PowMaybe</Namespace>
-  <Namespace>PowBasics.CollectionsExt</Namespace>
   <Namespace>LINQPadExtras.Scripting_Batcher</Namespace>
+  <Namespace>PowBasics.CollectionsExt</Namespace>
+  <Namespace>PowMaybe</Namespace>
   <Namespace>PowMaybeErr</Namespace>
 </Query>
 
@@ -64,6 +64,8 @@ public static class ReleaseLogic
 			$"Releasing {releaseVersion}",
 			cmd =>
 			{
+				var abc = 123;
+				
 				cmd.Cd(sln.Folder);
 				cmd.Run("dotnet", "build");
 			

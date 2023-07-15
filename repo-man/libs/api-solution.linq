@@ -1,5 +1,5 @@
 <Query Kind="Program">
-  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
+  <NuGetReference>LINQPadExtras</NuGetReference>
   <Namespace>LINQPadExtras</Namespace>
   <Namespace>PowBasics.CollectionsExt</Namespace>
   <Namespace>LINQPadExtras.Utils</Namespace>
@@ -91,10 +91,8 @@ public static class ApiSolution
 			};
 			mod.ForceSave();
 			mod.RemoveChildren(P(), baseProps);
-			mod.SetFlag(XmlFlag.GenerateDocumentationFile, false);
+			mod.SetFlag(XmlFlag.GenerateDocumentationFile, mod.GetFlag(XmlFlag.IsPackable));
 			mod.RemoveFlagsSetToDefaultValues();
-			var isPackable = mod.GetFlag(XmlFlag.IsPackable);
-			//if (isPackable) mod.SetFlag(XmlFlag.GenerateDocumentationFile, true);
 			var frameworkSrc = mod.GetOpt(P("TargetFramework"));
 			if (frameworkSrc != null)
 				if (frameworkUpgradeMap.TryGetValue(frameworkSrc, out var frameworkDst))
@@ -169,6 +167,10 @@ public static class ApiSolution
 			<ItemGroup>
 				<None Include="$(SolutionDir)\README.md" Pack="true" PackagePath="\" />
 			</ItemGroup>
+
+			<PropertyGroup>
+				<NoWarn>CS1591</NoWarn>
+			</PropertyGroup>
 
 		</Project>
 		""";

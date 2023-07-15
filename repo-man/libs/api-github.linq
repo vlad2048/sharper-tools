@@ -1,5 +1,5 @@
 <Query Kind="Program">
-  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
+  <NuGetReference>LINQPadExtras</NuGetReference>
   <NuGetReference>Octokit</NuGetReference>
   <Namespace>LINQPadExtras</Namespace>
   <Namespace>Octokit</Namespace>

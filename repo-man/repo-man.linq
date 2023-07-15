@@ -1,10 +1,11 @@
 <Query Kind="Program">
+  <Reference>C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\net7.0-windows\LINQPadExtras.dll</Reference>
   <NuGetReference>DynamicData</NuGetReference>
-  <NuGetReference>LINQPadExtras</NuGetReference>
   <NuGetReference>NuGet.Protocol</NuGetReference>
   <NuGetReference>Octokit</NuGetReference>
   <Namespace>DynamicData</Namespace>
   <Namespace>LINQPad.Controls</Namespace>
+  <Namespace>LINQPadExtras.Utils</Namespace>
   <Namespace>LINQPadExtras.Utils.Exts</Namespace>
   <Namespace>NuGet.Common</Namespace>
   <Namespace>NuGet.Configuration</Namespace>
@@ -12,8 +13,10 @@
   <Namespace>NuGet.Protocol.Core.Types</Namespace>
   <Namespace>PowBasics.CollectionsExt</Namespace>
   <Namespace>PowMaybe</Namespace>
+  <Namespace>PowMaybeErr</Namespace>
   <Namespace>PowRxVar</Namespace>
   <Namespace>PowRxVar.Utils</Namespace>
+  <Namespace>System.Net</Namespace>
   <Namespace>System.Reactive</Namespace>
   <Namespace>System.Reactive.Concurrency</Namespace>
   <Namespace>System.Reactive.Disposables</Namespace>
@@ -22,9 +25,6 @@
   <Namespace>System.Threading.Tasks</Namespace>
   <Namespace>System.Windows.Threading</Namespace>
   <Namespace>Windows.UI.Core</Namespace>
-  <Namespace>LINQPadExtras.Utils</Namespace>
-  <Namespace>PowMaybeErr</Namespace>
-  <Namespace>System.Net</Namespace>
   <CopyLocal>true</CopyLocal>
 </Query>
 
@@ -34,19 +34,19 @@ Manual
 ======
 
 cd C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar
-dotnet pack -p:version=0.0.12 -p:SolutionDir="C:\Dev_Nuget\Libs\PowRxVar"
-nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar\bin\Debug\PowRxVar.0.0.12.nupkg" -source "C:\Dev_Nuget\packages"
-nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar\bin\Debug\PowRxVar.0.0.12.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
+dotnet pack -p:version=0.0.39 -p:SolutionDir="C:\Dev_Nuget\Libs\PowRxVar"
+nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar\bin\Debug\PowRxVar.0.0.39.nupkg" -source "C:\Dev_Nuget\packages"
+nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar\bin\Debug\PowRxVar.0.0.39.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
 
 cd C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar.Maybe
-dotnet pack -p:version=0.0.12 -p:SolutionDir="C:\Dev_Nuget\Libs\PowRxVar"
-nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar.Maybe\bin\Debug\PowRxVar.Maybe.0.0.12.nupkg" -source "C:\Dev_Nuget\packages"
-nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar.Maybe\bin\Debug\PowRxVar.Maybe.0.0.12.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
+dotnet pack -p:version=0.0.39 -p:SolutionDir="C:\Dev_Nuget\Libs\PowRxVar"
+nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar.Maybe\bin\Debug\PowRxVar.Maybe.0.0.39.nupkg" -source "C:\Dev_Nuget\packages"
+nuget add "C:\Dev_Nuget\Libs\PowRxVar\Libs\PowRxVar.Maybe\bin\Debug\PowRxVar.Maybe.0.0.39.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
 
 cd C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras
-dotnet pack -p:version=0.0.13 -p:SolutionDir="C:\Dev_Nuget\Libs\LINQPadExtras"
-nuget add "C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\LINQPadExtras.0.0.13.nupkg" -source "C:\Dev_Nuget\packages"
-nuget add "C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\LINQPadExtras.0.0.13.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
+dotnet pack -p:version=0.0.20 -p:SolutionDir="C:\Dev_Nuget\Libs\LINQPadExtras"
+nuget add "C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\LINQPadExtras.0.0.20.nupkg" -source "C:\Dev_Nuget\packages"
+nuget add "C:\Dev_Nuget\Libs\LINQPadExtras\Libs\LINQPadExtras\bin\Debug\LINQPadExtras.0.0.20.nupkg" -source "C:\Users\vlad\.nuget\packages" -expand
 
 */
 
@@ -77,6 +77,8 @@ static SlnDetails[] GetAllSlns(Sln[] slns) => slns.Select(e => e.Details.V).Wher
 [STAThread]
 void Main()
 {
+	//Debugger.Launch();
+	
 	Css.Init();
 	
 	var showDependencies = Var.Make(false).D(mainD);
@@ -123,7 +125,7 @@ void Main()
 					}
 				))))
 		).D(mainD)
-		.ShowWhen(selSln.WhenVarNone())
+		.ShowWhen(selSln.SelectVar(e => e.IsNone()))
 		.Dump();
 	
 	selSln
@@ -132,7 +134,7 @@ void Main()
 		.Switch()
 		.Where(sln => sln.Details.V.IsSome())
 		.Display(sln => UI_Sln(sln.Nfo, sln.GitState.V, sln.Details.V.Ensure(), sln.D, selSln, () => GetAllSlns(solutions), () => refresh(sln), showDependencies, dryRun)).D(mainD)
-		.ShowWhen(selSln.WhenVarSome())
+		.ShowWhen(selSln.SelectVar(e => e.IsSome()))
 		.Dump();
 
 

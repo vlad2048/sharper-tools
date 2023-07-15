@@ -3,13 +3,23 @@
 public static class Cfg
 {
 	public static readonly string[] Solutions = {
-		@"C:\Dev_Nuget\Libs\PowBasics",
 		@"C:\Dev_Nuget\Libs\PowMaybe",
-		@"C:\Dev_Nuget\Libs\PowTrees",
 		@"C:\Dev_Nuget\Libs\PowRxVar",
-		@"C:\Dev_Nuget\Libs\PowWeb",
-		@"C:\Dev_Nuget\Libs\DynaServe",
+		
+		@"C:\Dev_Nuget\Libs\PowBasics",
 		@"C:\Dev_Nuget\Libs\LINQPadExtras",
+		@"C:\Dev_Nuget\Libs\PowTrees",
+		@"C:\Dev_Nuget\Libs\PowObjectListView",
+		@"C:\Dev_Nuget\Libs\PowWinForms",
+		
+		@"C:\Dev_Explore\WinDX",
+		
+		
+		//@"C:\Dev_Nuget\Libs\PowJson",
+
+		//@"C:\Dev_Nuget\Libs\LINQPadExtras",
+		//@"C:\Dev_Nuget\Libs\PowWeb",
+		//@"C:\Dev_Nuget\Libs\DynaServe",
 		
 		/*@"C:\tmp\GitTest",
 		@"C:\Dev\WebExtractor",

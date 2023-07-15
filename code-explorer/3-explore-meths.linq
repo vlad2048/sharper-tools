@@ -20,14 +20,14 @@
 void Main()
 {
 	Css.Init();
-	V.Init(true);
+	//V.Init(true);
 	var d = new Disp();
 
-	var dllFile = @"C:\Users\vlad\.nuget\packages\dynamicdata\7.12.1\lib\net6.0\DynamicData.dll";
-	var className = "DynamicData.ObservableCacheEx";
+	//var dllFile = @"C:\Users\vlad\.nuget\packages\dynamicdata\7.12.1\lib\net6.0\DynamicData.dll";
+	//var className = "DynamicData.ObservableCacheEx";
 	
-	dllFile = @"C:\Users\vlad\.nuget\packages\system.reactive\5.0.0\lib\net5.0\System.Reactive.dll";
-	className = "System.Reactive.Linq.Observable";
+	var dllFile = @"C:\Users\vlad\.nuget\packages\system.reactive\5.0.0\lib\net5.0\System.Reactive.dll";
+	var className = "System.Reactive.Linq.Observable";
 	
 	var typSet = TypSetLoader.Load(dllFile);
 	var typ = (

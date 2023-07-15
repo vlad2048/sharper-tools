@@ -12,11 +12,17 @@ void Main()
 	const int colHeight = 16 * zoom;
 	const int imgPad = 4 * zoom;
 	
-	var cols = ColorUtils.MakePalette(
+	/*var cols = ColorUtils.MakePalette(
 		16,
 		234,
 		sat: 0.72,
 		val: 0.58
+	);*/
+	var cols = ColorUtils.MakePalette(
+		12,
+		236,
+		sat: 0.72,
+		val: 0.98
 	);
 	cols
 		.Select(c => $"\"#{c.R:X2}{c.G:X2}{c.B:X2}\"")

@@ -11,13 +11,16 @@
 void Main()
 {
 	//ApiGit.RetrieveGitState(@"C:\tmp\GitTest").Dump();
-	
+
 	//ApiGit.AddAndPush(@"C:\Dev_Nuget\Libs\LINQPadExtras", "0.0.6");
-	
-	
-	//var folder = @"C:\Dev_Nuget\Libs\PowRxVar";
-	//var repo = new Repository(folder);
-	//repo.Push(repo.Head.CanonicalName);
+
+	// Test to reproduce/fix the Github expired key exception
+	if (false)
+	{
+		var folder = @"C:\Dev_Nuget\Libs\PowRxVar";
+		var repo = new Repository(folder);
+		repo.Push(repo.Head.CanonicalName);
+	}
 }
 
 
@@ -158,6 +161,7 @@ public static class ApiGit
 		var remote = repo.Network.Remotes["origin"];
 		try
 		{
+			// ! if you hit the exception here, enable the test in this file's Main() to reproduce/fix it
 			repo.Network.Push(remote, objectish, new PushOptions { CredentialsProvider = Credz });
 		}
 		catch (LibGit2SharpException ex) when (ex.Message.Contains("authentication", StringComparison.InvariantCultureIgnoreCase))
